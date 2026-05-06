@@ -1,23 +1,26 @@
 "use client";
+import { Suspense } from "react";
 import ProtectedLayout from "../components/ProtectedLayout";
 import FileUpload from "../components/FileUpload";
 import DashboardModal from "../components/DashboardModal";
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { monthlyReports } from "@/lib/dataService";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ];
 
-export default function Home() {
+function MonthlyContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const editId = searchParams.get("edit");
 
   const [month, setMonth] = useState(new Date().getMonth());
-  const [year, setYear] = useState(2025);
+  const [year, setYear] = useState(new Date().getFullYear());
   const [reportId, setReportId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
   
   const [sales, setSales] = useState({
     oyarifa: "",
@@ -44,17 +47,17 @@ export default function Home() {
   // Load report if editing
   useEffect(() => {
     if (editId) {
-      const reports = JSON.parse(localStorage.getItem("kam_aid_reports") || "[]");
-      const report = reports.find((r: any) => r.id === parseInt(editId));
-      if (report) {
-        setReportId(report.id);
-        setMonth(report.month);
-        setYear(report.year);
-        setSales(report.sales);
-        setCogs(report.cogs);
-        setExpenses(report.expenses);
-        setCustomExpenses(report.customExpenses || []);
-      }
+      monthlyReports.get(parseInt(editId)).then((report) => {
+        if (report) {
+          setReportId(report.id);
+          setMonth(report.month);
+          setYear(report.year);
+          setSales(report.sales as typeof sales);
+          setCogs(report.cogs);
+          setExpenses(report.expenses as typeof expenses);
+          setCustomExpenses((report.customExpenses as typeof customExpenses) || []);
+        }
+      }).catch(() => {});
     }
   }, [editId]);
 
@@ -65,41 +68,41 @@ export default function Home() {
   const grossProfit = totalSales - (parseFloat(cogs) || 0);
   const netProfit = grossProfit - totalExpenses;
 
-  // Save report
-  const handleSave = () => {
-    const report = {
-      id: reportId || Date.now(),
-      month,
-      year,
-      sales,
-      cogs,
-      expenses,
-      customExpenses,
-      totals: {
-        totalSales,
-        grossProfit,
-        netProfit,
-        totalExpenses
-      },
-      createdAt: new Date().toISOString()
-    };
+  const resetForm = () => {
+    setReportId(null);
+    setMonth(new Date().getMonth());
+    setYear(new Date().getFullYear());
+    setSales({ oyarifa: "", ghanaFlag: "", madina: "" });
+    setCogs("");
+    setExpenses({ salaries: "", rent: "", electricity: "", phone: "", pettyCash: "", maintenance: "", miscellaneous: "" });
+    setCustomExpenses([]);
+  };
 
-    const existing = JSON.parse(localStorage.getItem("kam_aid_reports") || "[]");
-    
-    if (reportId) {
-      const index = existing.findIndex((r: any) => r.id === reportId);
-      if (index !== -1) {
-        existing[index] = report;
-      }
-    } else {
-      existing.push(report);
+  // Save report
+  const handleSave = async () => {
+    if (totalSales === 0) {
+      alert("Please enter sales figures before saving.");
+      return;
     }
-    
-    localStorage.setItem("kam_aid_reports", JSON.stringify(existing));
-    alert(`Report ${reportId ? "updated" : "saved"} for ${MONTHS[month]} ${year}!`);
-    
-    if (reportId) {
-      router.push("/history");
+    setSaving(true);
+    const payload = {
+      month, year, sales, cogs, expenses, customExpenses,
+      totals: { totalSales, grossProfit, netProfit, totalExpenses },
+    };
+    try {
+      if (reportId) {
+        await monthlyReports.update(reportId, payload);
+        alert(`Report updated for ${MONTHS[month]} ${year}!`);
+        router.push("/history");
+      } else {
+        await monthlyReports.create(payload);
+        alert(`Report saved for ${MONTHS[month]} ${year}!`);
+        resetForm();
+      }
+    } catch (e: unknown) {
+      alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -107,7 +110,7 @@ export default function Home() {
   const handleNew = () => {
     setReportId(null);
     setMonth(new Date().getMonth());
-    setYear(2025);
+    setYear(new Date().getFullYear());
     setSales({ oyarifa: "", ghanaFlag: "", madina: "" });
     setCogs("");
     setExpenses({
@@ -236,9 +239,9 @@ const handleFileData = (data: {
               onChange={(e) => setYear(parseInt(e.target.value))}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
             >
-              <option value={2024}>2024</option>
-              <option value={2025}>2025</option>
-              <option value={2026}>2026</option>
+              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -389,9 +392,10 @@ const handleFileData = (data: {
 </button>
         <button
           onClick={handleSave}
-          className="px-6 py-3 rounded-xl bg-gradient-to-r from-sky-400 to-blue-500 text-white font-medium shadow-lg shadow-sky-500/25 hover:shadow-xl hover:shadow-sky-500/30 transition-all"
+          disabled={saving}
+          className="px-6 py-3 rounded-xl bg-gradient-to-r from-sky-400 to-blue-500 text-white font-medium shadow-lg shadow-sky-500/25 hover:shadow-xl hover:shadow-sky-500/30 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {reportId ? "Update Report" : "Save Report"}
+          {saving ? "Saving…" : reportId ? "Update Report" : "Save Report"}
         </button>
       </div>
       {/* Dashboard Modal */}
@@ -416,4 +420,7 @@ const handleFileData = (data: {
     </div>
     </ProtectedLayout>
   );
+}
+export default function Home() {
+  return <Suspense><MonthlyContent /></Suspense>;
 }

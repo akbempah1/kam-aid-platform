@@ -1,8 +1,10 @@
 "use client";
+import { Suspense } from "react";
 import ProtectedLayout from "../components/ProtectedLayout";
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Calendar, Plus, Trash2, Save, Eye, X, Download } from "lucide-react";
+import { weeklyReports } from "@/lib/dataService";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const BRANCHES = ["Oyarifa", "Ghana Flag", "Madina"];
@@ -25,7 +27,7 @@ type InventoryIssue = {
   branch: string;
 };
 
-export default function WeeklyReportPage() {
+function WeeklyReportContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const editId = searchParams.get("edit");
@@ -48,20 +50,21 @@ export default function WeeklyReportPage() {
   const [issues, setIssues] = useState<InventoryIssue[]>([]);
   const [newIssue, setNewIssue] = useState({ item: "", issue: "", branch: "Oyarifa" });
   const [showPreview, setShowPreview] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Load report if editing
   useEffect(() => {
     if (editId) {
-      const reports = JSON.parse(localStorage.getItem("kam_aid_weekly_reports") || "[]");
-      const report = reports.find((r: any) => r.id === parseInt(editId));
-      if (report) {
-        setReportId(report.id);
-        setWeekStart(report.weekStart);
-        setWeekEnd(report.weekEnd);
-        setDailySales(report.dailySales);
-        setExpenses(report.expenses || []);
-        setIssues(report.issues || []);
-      }
+      weeklyReports.get(parseInt(editId)).then((report) => {
+        if (report) {
+          setReportId(report.id);
+          setWeekStart(report.weekStart.slice(0, 10));
+          setWeekEnd(report.weekEnd.slice(0, 10));
+          setDailySales(report.dailySales as DailySales);
+          setExpenses((report.expenses as WeeklyExpense[]) || []);
+          setIssues((report.issues as InventoryIssue[]) || []);
+        }
+      }).catch(() => {});
     }
   }, [editId]);
 
@@ -112,14 +115,17 @@ export default function WeeklyReportPage() {
   };
 
   // Save report
-  const saveReport = () => {
+  const saveReport = async () => {
     if (!weekStart || !weekEnd) {
       alert("Please select the week start and end dates");
       return;
     }
-
-    const report = {
-      id: reportId || Date.now(),
+    if (new Date(weekStart) >= new Date(weekEnd)) {
+      alert("Week end date must be after the start date");
+      return;
+    }
+    setSaving(true);
+    const payload = {
       weekStart,
       weekEnd,
       dailySales,
@@ -131,27 +137,23 @@ export default function WeeklyReportPage() {
         byBranch: BRANCHES.reduce((acc, branch) => {
           acc[branch] = getTotalByBranch(branch);
           return acc;
-        }, {} as Record<string, number>)
+        }, {} as Record<string, number>),
       },
-      createdAt: new Date().toISOString()
     };
-
-    const existing = JSON.parse(localStorage.getItem("kam_aid_weekly_reports") || "[]");
-    
-    if (reportId) {
-      const index = existing.findIndex((r: any) => r.id === reportId);
-      if (index !== -1) {
-        existing[index] = report;
+    try {
+      if (reportId) {
+        await weeklyReports.update(reportId, payload);
+        alert("Weekly report updated!");
+        router.push("/history");
+      } else {
+        await weeklyReports.create(payload);
+        alert("Weekly report saved!");
+        clearForm();
       }
-    } else {
-      existing.push(report);
-    }
-
-    localStorage.setItem("kam_aid_weekly_reports", JSON.stringify(existing));
-    alert(`Weekly report ${reportId ? "updated" : "saved"}!`);
-    
-    if (reportId) {
-      router.push("/history");
+    } catch (e: unknown) {
+      alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -696,10 +698,11 @@ export default function WeeklyReportPage() {
           </button>
           <button
             onClick={saveReport}
-            className="px-6 py-3 rounded-xl bg-gradient-to-r from-sky-400 to-blue-500 text-white font-medium shadow-lg shadow-sky-500/25 hover:shadow-xl hover:shadow-sky-500/30 transition-all flex items-center gap-2"
+            disabled={saving}
+            className="px-6 py-3 rounded-xl bg-gradient-to-r from-sky-400 to-blue-500 text-white font-medium shadow-lg shadow-sky-500/25 hover:shadow-xl hover:shadow-sky-500/30 transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Save className="w-4 h-4" />
-            {reportId ? "Update Report" : "Save Report"}
+            {saving ? "Saving…" : reportId ? "Update Report" : "Save Report"}
           </button>
         </div>
       </div>
@@ -858,4 +861,7 @@ export default function WeeklyReportPage() {
     </div>
     </ProtectedLayout>
   );
+}
+export default function WeeklyReportPage() {
+  return <Suspense><WeeklyReportContent /></Suspense>;
 }

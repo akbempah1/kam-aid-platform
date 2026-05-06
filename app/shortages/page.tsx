@@ -1,8 +1,10 @@
 "use client";
+import { Suspense } from "react";
 import ProtectedLayout from "../components/ProtectedLayout";
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Package, Plus, Trash2, Save, Eye, X, Download, AlertTriangle, Search } from "lucide-react";
+import { shortagesReports } from "@/lib/dataService";
 
 const BRANCHES = ["Oyarifa", "Ghana Flag", "Madina"];
 
@@ -35,7 +37,7 @@ type ShortageItem = {
   dateReported: string;
 };
 
-export default function ShortagesPage() {
+function ShortagesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const editId = searchParams.get("edit");
@@ -48,6 +50,7 @@ export default function ShortagesPage() {
   const [filterBranch, setFilterBranch] = useState("All");
   const [filterPriority, setFilterPriority] = useState("All");
   const [showPreview, setShowPreview] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // New shortage form
   const [newShortage, setNewShortage] = useState<Omit<ShortageItem, "id" | "dateReported">>({
@@ -65,14 +68,14 @@ export default function ShortagesPage() {
   // Load report if editing
   useEffect(() => {
     if (editId) {
-      const reports = JSON.parse(localStorage.getItem("kam_aid_shortages") || "[]");
-      const report = reports.find((r: any) => r.id === parseInt(editId));
-      if (report) {
-        setReportId(report.id);
-        setReportDate(report.reportDate);
-        setReportedBy(report.reportedBy);
-        setShortages(report.shortages || []);
-      }
+      shortagesReports.get(parseInt(editId)).then((report) => {
+        if (report) {
+          setReportId(report.id);
+          setReportDate(report.reportDate.slice(0, 10));
+          setReportedBy(report.reportedBy);
+          setShortages(report.shortages as typeof shortages);
+        }
+      }).catch(() => {});
     }
   }, [editId]);
 
@@ -133,7 +136,7 @@ export default function ShortagesPage() {
   };
 
   // Save report
-  const saveReport = () => {
+  const saveReport = async () => {
     if (!reportDate || !reportedBy) {
       alert("Please fill in the report date and reported by fields");
       return;
@@ -144,28 +147,22 @@ export default function ShortagesPage() {
       return;
     }
 
-    const report = {
-      id: reportId || Date.now(),
-      reportDate,
-      reportedBy,
-      shortages,
-      stats,
-      createdAt: new Date().toISOString()
-    };
-
-    const existing = JSON.parse(localStorage.getItem("kam_aid_shortages") || "[]");
-
-    if (reportId) {
-      const index = existing.findIndex((r: any) => r.id === reportId);
-      if (index !== -1) existing[index] = report;
-    } else {
-      existing.push(report);
+    setSaving(true);
+    try {
+      if (reportId) {
+        await shortagesReports.update(reportId, { reportDate, reportedBy, shortages, stats });
+        alert("Shortages report updated!");
+        router.push("/history");
+      } else {
+        await shortagesReports.create({ reportDate, reportedBy, shortages, stats });
+        alert("Shortages report saved!");
+        clearForm();
+      }
+    } catch (e: unknown) {
+      alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
     }
-
-    localStorage.setItem("kam_aid_shortages", JSON.stringify(existing));
-    alert(`Shortages report ${reportId ? "updated" : "saved"}!`);
-
-    if (reportId) router.push("/history");
   };
 
   // Clear form
@@ -690,10 +687,11 @@ export default function ShortagesPage() {
           </button>
           <button
             onClick={saveReport}
-            className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-white font-medium shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/30 transition-all flex items-center gap-2"
+            disabled={saving}
+            className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-white font-medium shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/30 transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Save className="w-4 h-4" />
-            {reportId ? "Update Report" : "Save Report"}
+            {saving ? "Saving…" : reportId ? "Update Report" : "Save Report"}
           </button>
         </div>
       </div>
@@ -819,4 +817,7 @@ export default function ShortagesPage() {
     </div>
     </ProtectedLayout>
   );
+}
+export default function ShortagesPage() {
+  return <Suspense><ShortagesContent /></Suspense>;
 }

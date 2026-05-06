@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { Pill, LayoutDashboard, Calendar, ClipboardCheck, Package, History, Settings, Home, LogOut, User } from "lucide-react";
+import { Pill, LayoutDashboard, Calendar, ClipboardCheck, Package, History, Settings, Home, LogOut, User, Database } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: Home, section: "OVERVIEW" },
@@ -12,6 +12,7 @@ const navItems = [
   { href: "/branch-visit", label: "Branch Visit", icon: ClipboardCheck, section: "REPORTS" },
   { href: "/shortages", label: "Shortages", icon: Package, section: "REPORTS" },
   { href: "/history", label: "History", icon: History, section: "DATA" },
+  { href: "/migrate", label: "Migrate Data", icon: Database, section: "DATA" },
   { href: "/settings", label: "Settings", icon: Settings, section: "DATA" },
 ];
 
@@ -46,7 +47,7 @@ export default function Sidebar() {
             <div className="space-y-1">
               {items.map((item) => {
                 const Icon = item.icon;
-                const isActive = pathname === item.href;
+                const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                 return (
                   <Link
                     key={item.href}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import * as dataService from "@/lib/dataService";
 import ProtectedLayout from "./components/ProtectedLayout";
 import {
   TrendingUp,
@@ -52,20 +53,29 @@ export default function DashboardPage() {
   const [weeklyReports, setWeeklyReports] = useState<any[]>([]);
   const [branchVisits, setBranchVisits] = useState<any[]>([]);
   const [shortagesReports, setShortagesReports] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Load all data
   useEffect(() => {
-    setMonthlyReports(JSON.parse(localStorage.getItem("kam_aid_reports") || "[]"));
-    setWeeklyReports(JSON.parse(localStorage.getItem("kam_aid_weekly_reports") || "[]"));
-    setBranchVisits(JSON.parse(localStorage.getItem("kam_aid_branch_visits") || "[]"));
-    setShortagesReports(JSON.parse(localStorage.getItem("kam_aid_shortages") || "[]"));
+    setLoading(true);
+    Promise.all([
+      dataService.monthlyReports.list(),
+      dataService.weeklyReports.list(),
+      dataService.branchVisits.list(),
+      dataService.shortagesReports.list(),
+    ]).then(([monthly, weekly, visits, shortages]) => {
+      setMonthlyReports(monthly);
+      setWeeklyReports(weekly);
+      setBranchVisits(visits);
+      setShortagesReports(shortages);
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   // Calculate overall stats
   const totalReports = monthlyReports.length + weeklyReports.length + branchVisits.length + shortagesReports.length;
-  
-  const latestMonthly = monthlyReports.sort((a, b) => b.id - a.id)[0];
-  const latestWeekly = weeklyReports.sort((a, b) => b.id - a.id)[0];
+
+  const latestMonthly = [...monthlyReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+  const latestWeekly = [...weeklyReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
   
   const totalRevenue = monthlyReports.reduce((sum, r) => sum + (r.totals?.totalSales || 0), 0);
   const totalProfit = monthlyReports.reduce((sum, r) => sum + (r.totals?.netProfit || 0), 0);
@@ -186,6 +196,17 @@ export default function DashboardPage() {
     { label: "Branch Visit", href: "/branch-visit", icon: MapPin, color: "emerald" },
     { label: "Shortages", href: "/shortages", icon: Package, color: "amber" },
   ];
+
+  if (loading) return (
+    <ProtectedLayout>
+      <div className="flex items-center justify-center py-24">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-slate-500">Loading dashboard…</p>
+        </div>
+      </div>
+    </ProtectedLayout>
+  );
 
   return (
     <ProtectedLayout>

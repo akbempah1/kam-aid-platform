@@ -1,473 +1,493 @@
 "use client";
+import { Suspense } from "react";
 import ProtectedLayout from "../components/ProtectedLayout";
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { MapPin, Plus, Trash2, Save, Eye, X, Download, CheckCircle, XCircle, AlertTriangle, Building2 } from "lucide-react";
+import {
+  MapPin, Plus, Trash2, Save, Eye, X, Download,
+  Building2, AlertTriangle, Shield, Package,
+  Wifi, Users, FileText, DollarSign, Settings,
+  MessageSquare, ShoppingCart,
+} from "lucide-react";
+import { branchVisits } from "@/lib/dataService";
 
 const BRANCHES = ["Oyarifa", "Ghana Flag", "Madina"];
 
-const CHECKLIST_ITEMS = [
-  { id: "cleanliness", category: "Store Condition", label: "Store cleanliness and organization" },
-  { id: "shelving", category: "Store Condition", label: "Products properly shelved and labeled" },
-  { id: "expiry", category: "Inventory", label: "Expiry dates checked and managed" },
-  { id: "stockLevels", category: "Inventory", label: "Adequate stock levels maintained" },
-  { id: "coldChain", category: "Inventory", label: "Cold chain products properly stored" },
-  { id: "staffPresent", category: "Staff", label: "All scheduled staff present" },
-  { id: "uniformCompliance", category: "Staff", label: "Staff in proper uniform" },
-  { id: "customerService", category: "Staff", label: "Good customer service observed" },
-  { id: "posWorking", category: "Equipment", label: "POS system functioning properly" },
-  { id: "airconWorking", category: "Equipment", label: "Air conditioning working" },
-  { id: "securityMeasures", category: "Security", label: "Security measures in place" },
-  { id: "cashHandling", category: "Security", label: "Proper cash handling procedures" },
-];
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-type ChecklistStatus = "pass" | "fail" | "na";
+type QualityItem = { rating: number; observation: string };
+type BinaryItem  = { value: boolean | null; notes: string };
 
-type BranchChecklist = {
-  [branch: string]: {
-    [itemId: string]: { status: ChecklistStatus; notes: string };
+type ExpiredDrug   = { id: number; drugName: string; expiryDate: string; quantity: string; shelfLocation: string };
+type NearExpiryDrug = { id: number; drugName: string; expiryDate: string; quantity: string; stickerApplied: boolean | null };
+type OutOfStockItem = { id: number; productName: string; duration: string };
+type ShelfEntry     = { id: number; workerName: string; shelfArea: string; rating: number; observation: string };
+type StaffEntry     = { id: number; name: string; present: boolean | null; inLabCoat: boolean | null };
+type ActionItem     = { id: number; action: string; dueDate: string; responsible: string; branch: string };
+type AutoIssue      = { id: number; description: string; priority: "high" | "medium"; branch: string; assignedTo: string };
+
+type BranchInspection = {
+  exterior:      { frontCleanliness: QualityItem; signageWorking: BinaryItem };
+  interiorSpaces:{ floors: QualityItem; washroom: QualityItem; storeroom: QualityItem };
+  shelvesProducts: {
+    overallAppearance: QualityItem;
+    individualShelves: ShelfEntry[];
+    expiredDrugsFound: BinaryItem;
+    expiredDrugs: ExpiredDrug[];
+    nearExpiryFound: BinaryItem;
+    nearExpiryItems: NearExpiryDrug[];
+    counterCleanliness: QualityItem;
   };
+  inventory:    { outOfStockItems: OutOfStockItem[] };
+  systems:      { posOperational: BinaryItem; noPendingTransfers: BinaryItem; internetConnectivity: BinaryItem; devicesCharged: BinaryItem; airtimeAvailable: BinaryItem };
+  personnel:    { staffEntries: StaffEntry[]; staffAttitude: QualityItem };
+  utilities:    { acWorking: BinaryItem; fridgeWorking: BinaryItem; lightBulbsFunctional: BinaryItem };
+  documentation:{ handoverBookSignedOff: BinaryItem };
+  security:     { cctvOperational: BinaryItem; safeCashBoxSecured: BinaryItem };
+  adminComms:   { allMessagesReplied: BinaryItem; dailySalesReportSubmitted: BinaryItem; customerComplaints: BinaryItem };
+  pettyCash:    { openingBalance: string; amountSpent: string; notes: string };
 };
 
-type Issue = {
-  id: number;
-  description: string;
-  priority: "high" | "medium" | "low";
-  branch: string;
-  assignedTo: string;
+type InspectionData = Record<string, BranchInspection>;
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const RATING_LABELS: Record<number, string> = {
+  0: "", 1: "Very Poor", 2: "Poor", 3: "Acceptable", 4: "Good", 5: "Excellent",
 };
 
-type ActionItem = {
-  id: number;
-  action: string;
-  dueDate: string;
-  responsible: string;
-  branch: string;
+const emptyQuality  = (): QualityItem => ({ rating: 0, observation: "" });
+const emptyBinary   = (): BinaryItem  => ({ value: null, notes: "" });
+
+const createEmptyInspection = (): BranchInspection => ({
+  exterior:       { frontCleanliness: emptyQuality(), signageWorking: emptyBinary() },
+  interiorSpaces: { floors: emptyQuality(), washroom: emptyQuality(), storeroom: emptyQuality() },
+  shelvesProducts: {
+    overallAppearance: emptyQuality(), individualShelves: [],
+    expiredDrugsFound: emptyBinary(), expiredDrugs: [],
+    nearExpiryFound: emptyBinary(), nearExpiryItems: [],
+    counterCleanliness: emptyQuality(),
+  },
+  inventory:     { outOfStockItems: [] },
+  systems:       { posOperational: emptyBinary(), noPendingTransfers: emptyBinary(), internetConnectivity: emptyBinary(), devicesCharged: emptyBinary(), airtimeAvailable: emptyBinary() },
+  personnel:     { staffEntries: [], staffAttitude: emptyQuality() },
+  utilities:     { acWorking: emptyBinary(), fridgeWorking: emptyBinary(), lightBulbsFunctional: emptyBinary() },
+  documentation: { handoverBookSignedOff: emptyBinary() },
+  security:      { cctvOperational: emptyBinary(), safeCashBoxSecured: emptyBinary() },
+  adminComms:    { allMessagesReplied: emptyBinary(), dailySalesReportSubmitted: emptyBinary(), customerComplaints: emptyBinary() },
+  pettyCash:     { openingBalance: "", amountSpent: "", notes: "" },
+});
+
+const createInitialData = (): InspectionData => {
+  const d: InspectionData = {};
+  BRANCHES.forEach(b => { d[b] = createEmptyInspection(); });
+  return d;
 };
 
-type BranchRating = {
-  [branch: string]: number;
-};
+// ─── Small reusable components ────────────────────────────────────────────────
 
-export default function BranchVisitPage() {
+function RatingButtons({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex gap-1.5 items-center flex-wrap">
+      {[1, 2, 3, 4, 5].map(n => (
+        <button
+          key={n} type="button"
+          onClick={() => onChange(value === n ? 0 : n)}
+          className={`w-9 h-9 rounded-lg text-sm font-bold transition-all ${
+            value === n
+              ? n <= 2 ? "bg-red-500 text-white shadow-sm"
+                : n === 3 ? "bg-amber-500 text-white shadow-sm"
+                : "bg-emerald-500 text-white shadow-sm"
+              : "bg-white border border-slate-200 text-slate-400 hover:border-slate-400"
+          }`}
+        >{n}</button>
+      ))}
+      {value > 0 && (
+        <span className={`text-xs font-semibold ml-1 ${value <= 2 ? "text-red-500" : value === 3 ? "text-amber-500" : "text-emerald-600"}`}>
+          {RATING_LABELS[value]}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function QualityRow({ label, item, onChange }: { label: string; item: QualityItem; onChange: (u: Partial<QualityItem>) => void }) {
+  return (
+    <div className="p-4 bg-slate-50 rounded-xl space-y-2">
+      <p className="font-medium text-slate-800 text-sm">{label}</p>
+      <RatingButtons value={item.rating} onChange={rating => onChange({ rating })} />
+      <textarea
+        placeholder="What did you observe?"
+        value={item.observation}
+        onChange={e => onChange({ observation: e.target.value })}
+        rows={2}
+        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+      />
+    </div>
+  );
+}
+
+function BinaryRow({ label, item, onChange, critical }: { label: string; item: BinaryItem; onChange: (u: Partial<BinaryItem>) => void; critical?: boolean }) {
+  return (
+    <div className="p-4 bg-slate-50 rounded-xl space-y-2">
+      <div className="flex items-center gap-3">
+        <p className="flex-1 font-medium text-slate-800 text-sm">{label}</p>
+        <div className="flex gap-2 shrink-0">
+          <button type="button"
+            onClick={() => onChange({ value: item.value === true ? null : true })}
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${item.value === true ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500 hover:border-emerald-300"}`}
+          >Yes</button>
+          <button type="button"
+            onClick={() => onChange({ value: item.value === false ? null : false })}
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${item.value === false ? (critical ? "bg-red-500 text-white" : "bg-amber-500 text-white") : "bg-white border border-slate-200 text-slate-500 hover:border-red-300"}`}
+          >No</button>
+        </div>
+      </div>
+      {(item.value === false || item.notes) && (
+        <input type="text" placeholder="Add notes..."
+          value={item.notes} onChange={e => onChange({ notes: e.target.value })}
+          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+      )}
+    </div>
+  );
+}
+
+function SectionCard({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+      <h2 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">{icon}{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+function BranchVisitContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const editId = searchParams.get("edit");
 
-  const [reportId, setReportId] = useState<number | null>(null);
+  const [reportId, setReportId]     = useState<number | null>(null);
   const [reportType, setReportType] = useState<"single" | "consolidated">("consolidated");
-  const [visitDate, setVisitDate] = useState("");
+  const [visitDate, setVisitDate]   = useState("");
   const [selectedBranch, setSelectedBranch] = useState("Oyarifa");
-  const [visitedBy, setVisitedBy] = useState("");
-  
-  // For consolidated report - checklist per branch
-  const [branchChecklist, setBranchChecklist] = useState<BranchChecklist>(() => {
-    const initial: BranchChecklist = {};
-    BRANCHES.forEach(branch => {
-      initial[branch] = {};
-      CHECKLIST_ITEMS.forEach(item => {
-        initial[branch][item.id] = { status: "na", notes: "" };
-      });
-    });
-    return initial;
-  });
-
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [newIssue, setNewIssue] = useState({ description: "", priority: "medium" as "high" | "medium" | "low", branch: "Oyarifa", assignedTo: "" });
-  const [actionItems, setActionItems] = useState<ActionItem[]>([]);
-  const [newAction, setNewAction] = useState({ action: "", dueDate: "", responsible: "", branch: "Oyarifa" });
-  const [branchRatings, setBranchRatings] = useState<BranchRating>({ Oyarifa: 0, "Ghana Flag": 0, Madina: 0 });
-  const [generalNotes, setGeneralNotes] = useState("");
-  const [showPreview, setShowPreview] = useState(false);
+  const [visitedBy, setVisitedBy]   = useState("");
   const [activeBranchTab, setActiveBranchTab] = useState("Oyarifa");
+  const [inspectionData, setInspectionData]   = useState<InspectionData>(createInitialData);
+  const [actionItems, setActionItems] = useState<ActionItem[]>([]);
+  const [newAction, setNewAction]   = useState({ action: "", dueDate: "", responsible: "", branch: "Oyarifa" });
+  const [generalNotes, setGeneralNotes] = useState("");
+  const [showPreview, setShowPreview]   = useState(false);
+  const [saving, setSaving]             = useState(false);
 
-  // Load report if editing
+  const activeBranches = reportType === "single" ? [selectedBranch] : BRANCHES;
+  const currentBranch  = reportType === "single" ? selectedBranch : activeBranchTab;
+
+  // ── State helpers ───────────────────────────────────────────────────────────
+
+  const updateBranch = (branch: string, fn: (p: BranchInspection) => BranchInspection) =>
+    setInspectionData(prev => ({ ...prev, [branch]: fn(prev[branch]) }));
+
+  const upd = (fn: (p: BranchInspection) => BranchInspection) => updateBranch(currentBranch, fn);
+
+  // ── Scoring ─────────────────────────────────────────────────────────────────
+
+  const getBranchScore = (branch: string): number => {
+    const d = inspectionData[branch];
+    if (!d) return 0;
+    const qualityRatings = [
+      d.exterior.frontCleanliness.rating,
+      d.interiorSpaces.floors.rating, d.interiorSpaces.washroom.rating, d.interiorSpaces.storeroom.rating,
+      d.shelvesProducts.overallAppearance.rating, d.shelvesProducts.counterCleanliness.rating,
+      d.personnel.staffAttitude.rating,
+      ...d.shelvesProducts.individualShelves.map(s => s.rating),
+    ].filter(r => r > 0);
+    const binaryValues = [
+      d.exterior.signageWorking.value, d.systems.posOperational.value, d.systems.noPendingTransfers.value,
+      d.systems.internetConnectivity.value, d.systems.devicesCharged.value, d.systems.airtimeAvailable.value,
+      d.utilities.acWorking.value, d.utilities.fridgeWorking.value, d.utilities.lightBulbsFunctional.value,
+      d.documentation.handoverBookSignedOff.value, d.security.cctvOperational.value,
+      d.security.safeCashBoxSecured.value, d.adminComms.allMessagesReplied.value,
+      d.adminComms.dailySalesReportSubmitted.value,
+    ].filter(v => v !== null) as boolean[];
+    const qualityScore = qualityRatings.length > 0
+      ? (qualityRatings.reduce((a, b) => a + b, 0) / qualityRatings.length / 5) * 100 : 0;
+    const binaryScore  = binaryValues.length > 0
+      ? (binaryValues.filter(Boolean).length / binaryValues.length) * 100 : 0;
+    if (qualityRatings.length > 0 && binaryValues.length > 0) return (qualityScore + binaryScore) / 2;
+    return qualityScore || binaryScore;
+  };
+
+  const getOverallScore = () => {
+    const scores = activeBranches.map(getBranchScore).filter(s => s > 0);
+    return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  };
+
+  // ── Auto-issue generation ───────────────────────────────────────────────────
+
+  const generateIssues = (): AutoIssue[] => {
+    const issues: AutoIssue[] = [];
+    let id = Date.now();
+    activeBranches.forEach(branch => {
+      const d = inspectionData[branch];
+      if (!d) return;
+      // Quality items ≤ 2
+      [
+        { item: d.exterior.frontCleanliness,          label: "Front of shop cleanliness" },
+        { item: d.interiorSpaces.floors,               label: "Floor condition" },
+        { item: d.interiorSpaces.washroom,             label: "Washroom condition" },
+        { item: d.interiorSpaces.storeroom,            label: "Storeroom condition" },
+        { item: d.shelvesProducts.overallAppearance,   label: "Shelf appearance" },
+        { item: d.shelvesProducts.counterCleanliness,  label: "Counter cleanliness" },
+        { item: d.personnel.staffAttitude,             label: "Staff attitude" },
+      ].forEach(({ item, label }) => {
+        if (item.rating > 0 && item.rating <= 2)
+          issues.push({ id: id++, description: `${label} rated ${item.rating}/5${item.observation ? ` — ${item.observation}` : ""}`, priority: item.rating === 1 ? "high" : "medium", branch, assignedTo: "" });
+      });
+      // Individual shelves ≤ 2
+      d.shelvesProducts.individualShelves.forEach(s => {
+        if (s.rating > 0 && s.rating <= 2)
+          issues.push({ id: id++, description: `Shelf cleanliness: ${s.workerName} (${s.shelfArea}) rated ${s.rating}/5${s.observation ? ` — ${s.observation}` : ""}`, priority: s.rating === 1 ? "high" : "medium", branch, assignedTo: s.workerName });
+      });
+      // Expired drugs
+      d.shelvesProducts.expiredDrugs.forEach(drug =>
+        issues.push({ id: id++, description: `Expired drug: ${drug.drugName} | Exp: ${drug.expiryDate} | Qty: ${drug.quantity} | Location: ${drug.shelfLocation}`, priority: "high", branch, assignedTo: "" })
+      );
+      // Critical binary No
+      if (d.utilities.fridgeWorking.value === false)
+        issues.push({ id: id++, description: `Fridge not working${d.utilities.fridgeWorking.notes ? ` — ${d.utilities.fridgeWorking.notes}` : ""}`, priority: "high", branch, assignedTo: "" });
+      if (d.systems.noPendingTransfers.value === false)
+        issues.push({ id: id++, description: `Pending transfers on LavaBMS${d.systems.noPendingTransfers.notes ? ` — ${d.systems.noPendingTransfers.notes}` : ""}`, priority: "high", branch, assignedTo: "" });
+      // Medium binary No
+      [
+        { item: d.exterior.signageWorking,                  label: "Signage not working" },
+        { item: d.systems.posOperational,                   label: "POS not operational" },
+        { item: d.systems.internetConnectivity,             label: "No internet connectivity" },
+        { item: d.systems.devicesCharged,                   label: "Mobile devices not charged" },
+        { item: d.systems.airtimeAvailable,                 label: "No airtime/call credit" },
+        { item: d.utilities.acWorking,                      label: "AC not working" },
+        { item: d.utilities.lightBulbsFunctional,           label: "Light bulbs not all functional" },
+        { item: d.documentation.handoverBookSignedOff,      label: "Handover book not properly signed off" },
+        { item: d.security.cctvOperational,                 label: "CCTV not operational" },
+        { item: d.security.safeCashBoxSecured,              label: "Safe/cash box not secured" },
+        { item: d.adminComms.allMessagesReplied,            label: "Not all messages replied" },
+        { item: d.adminComms.dailySalesReportSubmitted,     label: "Daily sales report not submitted" },
+      ].forEach(({ item, label }) => {
+        if (item.value === false)
+          issues.push({ id: id++, description: `${label}${item.notes ? ` — ${item.notes}` : ""}`, priority: "medium", branch, assignedTo: "" });
+      });
+      // Customer complaints
+      if (d.adminComms.customerComplaints.value === true)
+        issues.push({ id: id++, description: `Customer complaints reported${d.adminComms.customerComplaints.notes ? ` — ${d.adminComms.customerComplaints.notes}` : ""}`, priority: "medium", branch, assignedTo: "" });
+    });
+    return issues;
+  };
+
+  // ── Load for edit ───────────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (editId) {
-      const reports = JSON.parse(localStorage.getItem("kam_aid_branch_visits") || "[]");
-      const report = reports.find((r: any) => r.id === parseInt(editId));
-      if (report) {
-        setReportId(report.id);
-        setReportType(report.reportType || "single");
-        setVisitDate(report.visitDate);
-        setSelectedBranch(report.branch || "Oyarifa");
-        setVisitedBy(report.visitedBy);
-        setBranchChecklist(report.branchChecklist || report.checklist);
-        setIssues(report.issues || []);
-        setActionItems(report.actionItems || []);
-        setBranchRatings(report.branchRatings || { Oyarifa: report.overallRating || 0, "Ghana Flag": 0, Madina: 0 });
-        setGeneralNotes(report.generalNotes || "");
+    if (!editId) return;
+    branchVisits.get(parseInt(editId)).then(report => {
+      if (!report) return;
+      setReportId(report.id);
+      setReportType((report.reportType as "single" | "consolidated") || "single");
+      setVisitDate(report.visitDate.slice(0, 10));
+      setSelectedBranch(report.branch || "Oyarifa");
+      setVisitedBy(report.visitedBy);
+      const raw = report.branchChecklist as unknown as Record<string, unknown>;
+      if (raw && typeof raw === "object") {
+        const first = raw[Object.keys(raw)[0]];
+        if (first && typeof first === "object" && "exterior" in (first as object))
+          setInspectionData(raw as InspectionData);
       }
-    }
+      setActionItems(report.actionItems as ActionItem[]);
+      setGeneralNotes(report.generalNotes || "");
+    }).catch(() => {});
   }, [editId]);
 
-  // Get branches to show based on report type
-  const activeBranches = reportType === "single" ? [selectedBranch] : BRANCHES;
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  // Update checklist item
-  const updateChecklistStatus = (branch: string, itemId: string, status: ChecklistStatus) => {
-    setBranchChecklist(prev => ({
-      ...prev,
-      [branch]: {
-        ...prev[branch],
-        [itemId]: { ...prev[branch][itemId], status }
-      }
-    }));
-  };
-
-  const updateChecklistNotes = (branch: string, itemId: string, notes: string) => {
-    setBranchChecklist(prev => ({
-      ...prev,
-      [branch]: {
-        ...prev[branch],
-        [itemId]: { ...prev[branch][itemId], notes }
-      }
-    }));
-  };
-
-  // Calculate stats per branch
-  const getBranchStats = (branch: string) => {
-    const items = branchChecklist[branch];
-    if (!items) return { passCount: 0, failCount: 0, complianceRate: 0 };
-    
-    const passCount = Object.values(items).filter(item => item.status === "pass").length;
-    const failCount = Object.values(items).filter(item => item.status === "fail").length;
-    const totalChecked = passCount + failCount;
-    const complianceRate = totalChecked > 0 ? (passCount / totalChecked) * 100 : 0;
-    
-    return { passCount, failCount, complianceRate };
-  };
-
-  // Calculate overall stats
-  const getOverallStats = () => {
-    let totalPass = 0, totalFail = 0;
-    activeBranches.forEach(branch => {
-      const stats = getBranchStats(branch);
-      totalPass += stats.passCount;
-      totalFail += stats.failCount;
-    });
-    const totalChecked = totalPass + totalFail;
-    const complianceRate = totalChecked > 0 ? (totalPass / totalChecked) * 100 : 0;
-    return { passCount: totalPass, failCount: totalFail, complianceRate };
-  };
-
-  const overallStats = getOverallStats();
-
-  // Add issue
-  const addIssue = () => {
-    if (newIssue.description) {
-      setIssues([...issues, { ...newIssue, id: Date.now() }]);
-      setNewIssue({ description: "", priority: "medium", branch: activeBranchTab, assignedTo: "" });
-    }
-  };
-
-  const removeIssue = (id: number) => setIssues(issues.filter(i => i.id !== id));
-
-  // Add action item
-  const addActionItem = () => {
-    if (newAction.action) {
-      setActionItems([...actionItems, { ...newAction, id: Date.now() }]);
-      setNewAction({ action: "", dueDate: "", responsible: "", branch: activeBranchTab });
-    }
-  };
-
-  const removeActionItem = (id: number) => setActionItems(actionItems.filter(a => a.id !== id));
-
-  // Save report
-  const saveReport = () => {
-    if (!visitDate || !visitedBy) {
-      alert("Please fill in the visit date and visited by fields");
-      return;
-    }
-
-    const report = {
-      id: reportId || Date.now(),
-      reportType,
-      visitDate,
-      branch: reportType === "single" ? selectedBranch : "All Branches",
-      visitedBy,
-      branchChecklist,
-      issues,
-      actionItems,
-      branchRatings,
-      generalNotes,
-      stats: {
-        overall: overallStats,
-        byBranch: activeBranches.reduce((acc, branch) => {
-          acc[branch] = getBranchStats(branch);
-          return acc;
-        }, {} as Record<string, any>)
-      },
-      createdAt: new Date().toISOString()
-    };
-
-    const existing = JSON.parse(localStorage.getItem("kam_aid_branch_visits") || "[]");
-
-    if (reportId) {
-      const index = existing.findIndex((r: any) => r.id === reportId);
-      if (index !== -1) existing[index] = report;
-    } else {
-      existing.push(report);
-    }
-
-    localStorage.setItem("kam_aid_branch_visits", JSON.stringify(existing));
-    alert(`Branch visit report ${reportId ? "updated" : "saved"}!`);
-
-    if (reportId) router.push("/history");
-  };
-
-  // Clear form
   const clearForm = () => {
-    setReportId(null);
-    setReportType("consolidated");
-    setVisitDate("");
-    setSelectedBranch("Oyarifa");
-    setVisitedBy("");
-    setBranchChecklist(() => {
-      const initial: BranchChecklist = {};
-      BRANCHES.forEach(branch => {
-        initial[branch] = {};
-        CHECKLIST_ITEMS.forEach(item => {
-          initial[branch][item.id] = { status: "na", notes: "" };
-        });
-      });
-      return initial;
-    });
-    setIssues([]);
-    setActionItems([]);
-    setBranchRatings({ Oyarifa: 0, "Ghana Flag": 0, Madina: 0 });
-    setGeneralNotes("");
+    setReportId(null); setReportType("consolidated"); setVisitDate(""); setSelectedBranch("Oyarifa");
+    setVisitedBy(""); setInspectionData(createInitialData()); setActionItems([]); setGeneralNotes("");
     router.push("/branch-visit");
   };
 
-  // Format date
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "";
-    return new Date(dateString).toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      year: "numeric"
-    });
+  const formatDate = (s: string) => s ? new Date(s).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "";
+
+  const saveReport = async () => {
+    if (!visitDate || !visitedBy) { alert("Please fill in visit date and visited by"); return; }
+    const autoIssues = generateIssues();
+    const overall    = getOverallScore();
+    const payload = {
+      reportType, visitDate,
+      branch: reportType === "single" ? selectedBranch : "All Branches",
+      visitedBy,
+      branchChecklist: inspectionData as unknown as Record<string, Record<string, { status: "pass" | "fail" | "na"; notes: string }>>,
+      issues: autoIssues as unknown as { id: number; description: string; priority: string; branch: string; assignedTo: string }[],
+      actionItems, branchRatings: {}, generalNotes,
+      stats: {
+        overall: { passCount: 0, failCount: 0, complianceRate: overall },
+        byBranch: activeBranches.reduce((acc, b) => { acc[b] = { passCount: 0, failCount: 0, complianceRate: getBranchScore(b) }; return acc; }, {} as Record<string, { passCount: number; failCount: number; complianceRate: number }>),
+      },
+    };
+    setSaving(true);
+    try {
+      if (reportId) { await branchVisits.update(reportId, payload); alert("Report updated!"); router.push("/history"); }
+      else { await branchVisits.create(payload); alert("Report saved!"); clearForm(); }
+    } catch (e: unknown) { alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`); }
+    finally { setSaving(false); }
   };
 
-  // Group checklist by category
-  const groupedChecklist = CHECKLIST_ITEMS.reduce((acc, item) => {
-    if (!acc[item.category]) acc[item.category] = [];
-    acc[item.category].push(item);
-    return acc;
-  }, {} as Record<string, typeof CHECKLIST_ITEMS>);
+  // ── PDF export ──────────────────────────────────────────────────────────────
 
-  // Export PDF
   const exportPDF = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert("Please allow popups to export PDF");
-      return;
-    }
+    const win = window.open("", "_blank");
+    if (!win) { alert("Please allow popups"); return; }
+    const issues = generateIssues();
+    const overall = getOverallScore();
+    const ratingColor = (r: number) => r <= 2 ? "#ef4444" : r === 3 ? "#f59e0b" : "#10b981";
+    const scoreColor  = (s: number) => s >= 80 ? "#059669" : s >= 60 ? "#d97706" : "#dc2626";
 
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Branch Visit Report - ${reportType === "consolidated" ? "All Branches" : selectedBranch} - ${formatDate(visitDate)}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; background: white; color: #1e293b; line-height: 1.5; }
-          .header { display: flex; align-items: center; gap: 20px; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #e2e8f0; }
-          .logo { width: 50px; height: 50px; background: linear-gradient(135deg, #10b981, #059669); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-          .title { font-size: 28px; font-weight: 700; color: #1e293b; }
-          .subtitle { font-size: 14px; color: #64748b; margin-top: 4px; }
-          .badge { display: inline-block; background: #dbeafe; color: #2563eb; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-left: 12px; }
-          
-          .stats-grid { display: grid; grid-template-columns: repeat(${activeBranches.length + 1}, 1fr); gap: 16px; margin-bottom: 30px; }
-          .stat-card { border-radius: 16px; padding: 20px; text-align: center; }
-          .stat-card.overall { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
-          .stat-card.branch { background: #f8fafc; border: 1px solid #e2e8f0; }
-          .stat-value { font-size: 28px; font-weight: 700; }
-          .stat-label { font-size: 12px; opacity: 0.8; margin-top: 4px; }
-          .stat-detail { font-size: 11px; margin-top: 8px; opacity: 0.7; }
-          
-          .section { margin-bottom: 30px; }
-          .section-title { font-size: 14px; font-weight: 700; text-transform: uppercase; color: #1e293b; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #10b981; display: inline-block; }
-          
-          .branch-section { background: #f8fafc; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-          .branch-header { font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-          .branch-stats { display: flex; gap: 16px; font-size: 12px; }
-          .branch-stat { padding: 4px 12px; border-radius: 20px; }
-          .branch-stat.pass { background: #d1fae5; color: #059669; }
-          .branch-stat.fail { background: #fee2e2; color: #dc2626; }
-          
-          .category-title { font-size: 12px; font-weight: 600; color: #64748b; margin: 12px 0 8px 0; text-transform: uppercase; }
-          .checklist-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
-          .status-badge { width: 50px; text-align: center; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; }
-          .status-pass { background: #d1fae5; color: #059669; }
-          .status-fail { background: #fee2e2; color: #dc2626; }
-          .status-na { background: #f1f5f9; color: #64748b; }
-          .checklist-label { flex: 1; font-size: 13px; }
-          .checklist-notes { font-size: 11px; color: #64748b; font-style: italic; max-width: 200px; }
-          
-          .comparison-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-          .comparison-table th, .comparison-table td { padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0; }
-          .comparison-table th { background: #f8fafc; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; }
-          .comparison-table td { font-size: 13px; }
-          .comparison-table td.label { text-align: left; font-weight: 500; }
-          
-          .issue-item { padding: 12px; margin-bottom: 8px; border-radius: 8px; border-left: 4px solid; }
-          .issue-high { background: #fee2e2; border-left-color: #ef4444; }
-          .issue-medium { background: #fef3c7; border-left-color: #f59e0b; }
-          .issue-low { background: #dbeafe; border-left-color: #3b82f6; }
-          .issue-header { display: flex; justify-content: space-between; align-items: start; }
-          .issue-desc { font-size: 13px; font-weight: 500; }
-          .issue-meta { font-size: 11px; color: #64748b; margin-top: 4px; }
-          .priority-badge { font-size: 9px; font-weight: 700; text-transform: uppercase; padding: 2px 8px; border-radius: 10px; color: white; }
-          .priority-high { background: #ef4444; }
-          .priority-medium { background: #f59e0b; }
-          .priority-low { background: #3b82f6; }
-          
-          .ratings-grid { display: grid; grid-template-columns: repeat(${activeBranches.length}, 1fr); gap: 16px; }
-          .rating-card { background: #f8fafc; border-radius: 12px; padding: 16px; text-align: center; }
-          .rating-branch { font-weight: 600; margin-bottom: 8px; }
-          .rating-stars { font-size: 20px; }
-          
-          .footer { margin-top: 40px; padding-top: 20px; border-top: 2px solid #e2e8f0; text-align: center; }
-          .footer-title { font-size: 14px; font-weight: 700; color: #1e293b; }
-          .footer-sub { font-size: 12px; color: #64748b; margin-top: 4px; }
-          
-          @media print { body { padding: 20px; } -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="logo">📍</div>
-          <div>
-            <div class="title">
-              Branch Visit Report
-              ${reportType === "consolidated" ? '<span class="badge">CONSOLIDATED</span>' : ''}
-            </div>
-            <div class="subtitle">${reportType === "consolidated" ? "All Branches" : selectedBranch} • ${formatDate(visitDate)} • Visited by ${visitedBy}</div>
-          </div>
-        </div>
+    const renderBranchSections = (branch: string) => {
+      const d = inspectionData[branch];
+      if (!d) return "";
+      const q = (label: string, item: QualityItem) => item.rating > 0 ? `
+        <div class="check-row">
+          <span class="label">${label}</span>
+          <span class="rating-badge" style="background:${ratingColor(item.rating)}20;color:${ratingColor(item.rating)}">${item.rating}/5 ${RATING_LABELS[item.rating]}</span>
+          ${item.observation ? `<span class="obs">${item.observation}</span>` : ""}
+        </div>` : "";
+      const b = (label: string, item: BinaryItem) => item.value !== null ? `
+        <div class="check-row">
+          <span class="label">${label}</span>
+          <span class="yn-badge" style="background:${item.value ? "#d1fae5" : "#fee2e2"};color:${item.value ? "#059669" : "#dc2626"}">${item.value ? "YES" : "NO"}</span>
+          ${item.notes ? `<span class="obs">${item.notes}</span>` : ""}
+        </div>` : "";
 
-        <div class="stats-grid">
-          <div class="stat-card overall">
-            <div class="stat-value">${overallStats.complianceRate.toFixed(0)}%</div>
-            <div class="stat-label">Overall Compliance</div>
-            <div class="stat-detail">${overallStats.passCount} passed / ${overallStats.failCount} failed</div>
-          </div>
-          ${activeBranches.map(branch => {
-            const stats = getBranchStats(branch);
-            return `
-              <div class="stat-card branch">
-                <div class="stat-value" style="color: ${stats.complianceRate >= 80 ? '#059669' : stats.complianceRate >= 60 ? '#d97706' : '#dc2626'}">${stats.complianceRate.toFixed(0)}%</div>
-                <div class="stat-label">${branch}</div>
-                <div class="stat-detail">⭐ ${branchRatings[branch]}/5</div>
-              </div>
-            `;
-          }).join('')}
-        </div>
+      return `
+        <div class="branch-block">
+          <div class="branch-title">${branch} — Score: <span style="color:${scoreColor(getBranchScore(branch))}">${getBranchScore(branch).toFixed(0)}%</span></div>
+          <div class="cat-title">Exterior</div>
+          ${q("Front of shop cleanliness", d.exterior.frontCleanliness)}
+          ${b("Signage working", d.exterior.signageWorking)}
+          <div class="cat-title">Interior Spaces</div>
+          ${q("Floors", d.interiorSpaces.floors)}${q("Washroom", d.interiorSpaces.washroom)}${q("Storeroom", d.interiorSpaces.storeroom)}
+          <div class="cat-title">Shelves & Products</div>
+          ${q("Overall shelf appearance", d.shelvesProducts.overallAppearance)}
+          ${d.shelvesProducts.individualShelves.length > 0 ? `
+            <div style="margin:6px 0 2px 0;font-size:11px;font-weight:600;color:#64748b">Individual Shelves</div>
+            ${d.shelvesProducts.individualShelves.map(s => `<div class="check-row"><span class="label">${s.workerName} — ${s.shelfArea}</span><span class="rating-badge" style="background:${ratingColor(s.rating)}20;color:${ratingColor(s.rating)}">${s.rating}/5</span>${s.observation ? `<span class="obs">${s.observation}</span>` : ""}</div>`).join("")}
+          ` : ""}
+          ${b("Expired drugs found", d.shelvesProducts.expiredDrugsFound)}
+          ${d.shelvesProducts.expiredDrugs.length > 0 ? `
+            <table class="inner-table"><tr><th>Drug</th><th>Expiry</th><th>Qty</th><th>Location</th></tr>
+            ${d.shelvesProducts.expiredDrugs.map(x => `<tr><td>${x.drugName}</td><td>${x.expiryDate}</td><td>${x.quantity}</td><td>${x.shelfLocation}</td></tr>`).join("")}
+            </table>` : ""}
+          ${b("Near-expiry items", d.shelvesProducts.nearExpiryFound)}
+          ${d.shelvesProducts.nearExpiryItems.length > 0 ? `
+            <table class="inner-table"><tr><th>Drug</th><th>Expiry</th><th>Qty</th><th>Sticker</th></tr>
+            ${d.shelvesProducts.nearExpiryItems.map(x => `<tr><td>${x.drugName}</td><td>${x.expiryDate}</td><td>${x.quantity}</td><td>${x.stickerApplied === true ? "Yes" : x.stickerApplied === false ? "No" : "—"}</td></tr>`).join("")}
+            </table>` : ""}
+          ${q("Counter cleanliness", d.shelvesProducts.counterCleanliness)}
+          ${d.inventory.outOfStockItems.length > 0 ? `
+            <div class="cat-title">Inventory — Out of Stock</div>
+            ${d.inventory.outOfStockItems.map(x => `<div class="check-row"><span class="label">${x.productName}</span><span class="obs">${x.duration}</span></div>`).join("")}
+          ` : ""}
+          <div class="cat-title">Systems & Connectivity</div>
+          ${b("POS/PC operational", d.systems.posOperational)}
+          ${b("No pending transfers (LavaBMS)", d.systems.noPendingTransfers)}
+          ${b("Internet connectivity", d.systems.internetConnectivity)}
+          ${b("Mobile devices charged", d.systems.devicesCharged)}
+          ${b("Airtime/call credit", d.systems.airtimeAvailable)}
+          <div class="cat-title">Personnel</div>
+          ${d.personnel.staffEntries.length > 0 ? `
+            <table class="inner-table"><tr><th>Name</th><th>Present</th><th>Lab Coat</th></tr>
+            ${d.personnel.staffEntries.map(s => `<tr><td>${s.name}</td><td style="color:${s.present ? "#059669" : "#dc2626"}">${s.present === true ? "Yes" : s.present === false ? "No" : "—"}</td><td style="color:${s.inLabCoat ? "#059669" : "#dc2626"}">${s.inLabCoat === true ? "Yes" : s.inLabCoat === false ? "No" : "—"}</td></tr>`).join("")}
+            </table>` : ""}
+          ${q("Staff attitude", d.personnel.staffAttitude)}
+          <div class="cat-title">Utilities & Equipment</div>
+          ${b("AC working", d.utilities.acWorking)}${b("Fridge working", d.utilities.fridgeWorking)}${b("Light bulbs functional", d.utilities.lightBulbsFunctional)}
+          <div class="cat-title">Documentation</div>
+          ${b("Handover book signed off", d.documentation.handoverBookSignedOff)}
+          <div class="cat-title">Security</div>
+          ${b("CCTV operational", d.security.cctvOperational)}${b("Safe/cash box secured", d.security.safeCashBoxSecured)}
+          <div class="cat-title">Admin & Communication</div>
+          ${b("All messages replied", d.adminComms.allMessagesReplied)}
+          ${b("Daily sales report submitted", d.adminComms.dailySalesReportSubmitted)}
+          ${b("Customer complaints", d.adminComms.customerComplaints)}
+          ${(d.pettyCash.openingBalance || d.pettyCash.amountSpent) ? `
+            <div class="cat-title">Petty Cash</div>
+            <div class="check-row"><span class="label">Opening</span><span class="obs">GHS ${d.pettyCash.openingBalance || "0"}</span></div>
+            <div class="check-row"><span class="label">Spent</span><span class="obs">GHS ${d.pettyCash.amountSpent || "0"}</span></div>
+            <div class="check-row"><span class="label">Closing</span><span class="obs">GHS ${(parseFloat(d.pettyCash.openingBalance || "0") - parseFloat(d.pettyCash.amountSpent || "0")).toFixed(2)}</span></div>
+            ${d.pettyCash.notes ? `<div class="check-row"><span class="label">Notes</span><span class="obs">${d.pettyCash.notes}</span></div>` : ""}
+          ` : ""}
+        </div>`;
+    };
 
-        ${reportType === "consolidated" ? `
-          <div class="section">
-            <div class="section-title">Compliance Comparison</div>
-            <table class="comparison-table">
-              <thead>
-                <tr>
-                  <th style="text-align: left;">Checklist Item</th>
-                  ${BRANCHES.map(b => `<th>${b}</th>`).join('')}
-                </tr>
-              </thead>
-              <tbody>
-                ${CHECKLIST_ITEMS.map(item => `
-                  <tr>
-                    <td class="label">${item.label}</td>
-                    ${BRANCHES.map(branch => {
-                      const check = branchChecklist[branch]?.[item.id];
-                      return `<td><span class="status-badge status-${check?.status || 'na'}">${(check?.status || 'N/A').toUpperCase()}</span></td>`;
-                    }).join('')}
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        ` : `
-          <div class="section">
-            <div class="section-title">Inspection Checklist - ${selectedBranch}</div>
-            ${Object.entries(groupedChecklist).map(([category, items]) => `
-              <div class="category-title">${category}</div>
-              ${items.map(item => {
-                const check = branchChecklist[selectedBranch]?.[item.id];
-                return `
-                  <div class="checklist-item">
-                    <span class="status-badge status-${check?.status || 'na'}">${(check?.status || 'N/A').toUpperCase()}</span>
-                    <span class="checklist-label">${item.label}</span>
-                    ${check?.notes ? `<span class="checklist-notes">${check.notes}</span>` : ''}
-                  </div>
-                `;
-              }).join('')}
-            `).join('')}
-          </div>
-        `}
+    const html = `<!DOCTYPE html><html><head><title>Branch Visit Report</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:40px;color:#1e293b;line-height:1.5}
+      .header{display:flex;align-items:center;gap:16px;margin-bottom:28px;padding-bottom:20px;border-bottom:2px solid #e2e8f0}
+      .title{font-size:24px;font-weight:700}.subtitle{font-size:13px;color:#64748b;margin-top:4px}
+      .scores{display:grid;grid-template-columns:repeat(${activeBranches.length + 1},1fr);gap:12px;margin-bottom:28px}
+      .score-card{padding:16px;border-radius:12px;text-align:center}.score-card.overall{background:linear-gradient(135deg,#10b981,#059669);color:white}
+      .score-card.branch{background:#f8fafc;border:1px solid #e2e8f0}.score-val{font-size:28px;font-weight:700}.score-lbl{font-size:11px;opacity:.8;margin-top:2px}
+      .branch-block{margin-bottom:24px;padding:16px;background:#f8fafc;border-radius:12px}
+      .branch-title{font-size:15px;font-weight:700;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0}
+      .cat-title{font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin:10px 0 4px 0;letter-spacing:.05em}
+      .check-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f1f5f9;font-size:12px}
+      .label{flex:1;color:#334155}.obs{font-size:11px;color:#64748b;font-style:italic;max-width:220px}
+      .rating-badge,.yn-badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap}
+      .inner-table{width:100%;border-collapse:collapse;margin:4px 0 8px 0;font-size:11px}
+      .inner-table th,.inner-table td{padding:5px 8px;text-align:left;border-bottom:1px solid #e2e8f0}
+      .inner-table th{background:#f1f5f9;font-weight:600;color:#475569}
+      .issues-section{margin-bottom:24px}.issue-item{padding:10px 12px;margin-bottom:6px;border-radius:8px;border-left:4px solid;font-size:12px}
+      .issue-high{background:#fee2e2;border-left-color:#ef4444}.issue-medium{background:#fef3c7;border-left-color:#f59e0b}
+      .issue-desc{font-weight:500;color:#1e293b}.issue-meta{font-size:10px;color:#64748b;margin-top:2px}
+      .priority-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;color:white;float:right}
+      .ph{background:#ef4444}.pm{background:#f59e0b}
+      .footer{margin-top:32px;padding-top:16px;border-top:2px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b}
+      @media print{body{padding:20px}-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    </style></head><body>
+    <div class="header">
+      <div>
+        <div class="title">Branch Visit Report${reportType === "consolidated" ? " <span style='font-size:12px;background:#dbeafe;color:#2563eb;padding:2px 8px;border-radius:12px;font-weight:600'>CONSOLIDATED</span>" : ""}</div>
+        <div class="subtitle">${reportType === "consolidated" ? "All Branches" : selectedBranch} &bull; ${formatDate(visitDate)} &bull; Visited by ${visitedBy}</div>
+      </div>
+    </div>
+    <div class="scores">
+      <div class="score-card overall"><div class="score-val">${overall.toFixed(0)}%</div><div class="score-lbl">Overall Score</div></div>
+      ${activeBranches.map(b => `<div class="score-card branch"><div class="score-val" style="color:${scoreColor(getBranchScore(b))}">${getBranchScore(b).toFixed(0)}%</div><div class="score-lbl">${b}</div></div>`).join("")}
+    </div>
+    ${activeBranches.map(renderBranchSections).join("")}
+    ${issues.length > 0 ? `
+      <div class="issues-section">
+        <div style="font-size:14px;font-weight:700;margin-bottom:10px">Auto-Flagged Issues (${issues.length})</div>
+        ${issues.map(i => `<div class="issue-item issue-${i.priority}"><span class="priority-badge p${i.priority[0]}">${i.priority.toUpperCase()}</span><div class="issue-desc">${i.description}</div><div class="issue-meta">${i.branch}${i.assignedTo ? ` &bull; ${i.assignedTo}` : ""}</div></div>`).join("")}
+      </div>` : ""}
+    ${actionItems.length > 0 ? `
+      <div class="issues-section">
+        <div style="font-size:14px;font-weight:700;margin-bottom:10px">Action Items (${actionItems.length})</div>
+        ${actionItems.map(a => `<div class="issue-item" style="background:#f0f9ff;border-left-color:#3b82f6"><div class="issue-desc">${a.action}</div><div class="issue-meta">${a.branch}${a.responsible ? ` &bull; ${a.responsible}` : ""}${a.dueDate ? ` &bull; Due: ${formatDate(a.dueDate)}` : ""}</div></div>`).join("")}
+      </div>` : ""}
+    ${generalNotes ? `<div style="margin-bottom:24px"><div style="font-size:14px;font-weight:700;margin-bottom:8px">General Notes</div><div style="background:#f8fafc;padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap">${generalNotes}</div></div>` : ""}
+    <div class="footer">KAM AID Pharmacy &bull; Branch Visit Report &bull; Generated ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
+    </body></html>`;
 
-        ${issues.length > 0 ? `
-          <div class="section">
-            <div class="section-title">Issues Found (${issues.length})</div>
-            ${issues.map(issue => `
-              <div class="issue-item issue-${issue.priority}">
-                <div class="issue-header">
-                  <span class="issue-desc">${issue.description}</span>
-                  <span class="priority-badge priority-${issue.priority}">${issue.priority}</span>
-                </div>
-                <div class="issue-meta">${issue.branch}${issue.assignedTo ? ` • Assigned to: ${issue.assignedTo}` : ''}</div>
-              </div>
-            `).join('')}
-          </div>
-        ` : ''}
-
-        ${actionItems.length > 0 ? `
-          <div class="section">
-            <div class="section-title">Action Items (${actionItems.length})</div>
-            ${actionItems.map(action => `
-              <div class="issue-item" style="background: #f8fafc; border-left-color: #3b82f6;">
-                <div class="issue-desc">${action.action}</div>
-                <div class="issue-meta">${action.branch} • ${action.responsible}${action.dueDate ? ` • Due: ${formatDate(action.dueDate)}` : ''}</div>
-              </div>
-            `).join('')}
-          </div>
-        ` : ''}
-
-        <div class="section">
-          <div class="section-title">Branch Ratings</div>
-          <div class="ratings-grid">
-            ${activeBranches.map(branch => `
-              <div class="rating-card">
-                <div class="rating-branch">${branch}</div>
-                <div class="rating-stars">${'⭐'.repeat(branchRatings[branch])}${'☆'.repeat(5 - branchRatings[branch])}</div>
-                <div style="font-size: 12px; color: #64748b; margin-top: 4px;">${branchRatings[branch]}/5</div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-
-        ${generalNotes ? `
-          <div class="section">
-            <div class="section-title">General Notes</div>
-            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; white-space: pre-wrap;">${generalNotes}</div>
-          </div>
-        ` : ''}
-
-        <div class="footer">
-          <div class="footer-title">KAM AID Pharmacy • Branch Visit Report</div>
-          <div class="footer-sub">Generated on ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
-        </div>
-      </body>
-      </html>
-    `;
-
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    printWindow.onload = () => setTimeout(() => printWindow.print(), 500);
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => setTimeout(() => win.print(), 500);
   };
+
+  // ── Render inspection for a branch ─────────────────────────────────────────
+
+  const d = inspectionData[currentBranch];
+
+  // ── JSX ─────────────────────────────────────────────────────────────────────
 
   return (
     <ProtectedLayout>
@@ -475,445 +495,472 @@ export default function BranchVisitPage() {
       {/* Header */}
       <div className="mb-8 flex justify-between items-start">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 mb-2">
-            {reportId ? "Edit Branch Visit" : "Branch Visit Report"}
-          </h1>
-          <p className="text-slate-500">
-            {reportId
-              ? `Editing ${reportType} visit report`
-              : "Document branch inspections, issues, and action items"
-            }
-          </p>
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">{reportId ? "Edit Branch Visit" : "Branch Visit Report"}</h1>
+          <p className="text-slate-500">{reportId ? `Editing ${reportType} visit report` : "Structured inspection across 11 areas"}</p>
         </div>
         {reportId && (
-          <button
-            onClick={clearForm}
-            className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            New Report
+          <button onClick={clearForm} className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center gap-2">
+            <Plus className="w-4 h-4" /> New Report
           </button>
         )}
       </div>
 
-      {/* Report Type Selection */}
+      {/* Report Type */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
         <h2 className="text-lg font-semibold text-slate-800 mb-4">Report Type</h2>
         <div className="grid grid-cols-2 gap-4">
-          <button
-            onClick={() => setReportType("single")}
-            className={`p-4 rounded-xl border-2 transition-all flex items-center gap-4 ${
-              reportType === "single"
-                ? "border-emerald-500 bg-emerald-50"
-                : "border-slate-200 hover:border-slate-300"
-            }`}
-          >
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-              reportType === "single" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
-            }`}>
-              <MapPin className="w-6 h-6" />
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-slate-800">Single Branch</p>
-              <p className="text-sm text-slate-500">Inspect one branch at a time</p>
-            </div>
-          </button>
-          <button
-            onClick={() => setReportType("consolidated")}
-            className={`p-4 rounded-xl border-2 transition-all flex items-center gap-4 ${
-              reportType === "consolidated"
-                ? "border-emerald-500 bg-emerald-50"
-                : "border-slate-200 hover:border-slate-300"
-            }`}
-          >
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-              reportType === "consolidated" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
-            }`}>
-              <Building2 className="w-6 h-6" />
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-slate-800">Consolidated</p>
-              <p className="text-sm text-slate-500">Inspect all 3 branches & compare</p>
-            </div>
-          </button>
+          {(["single", "consolidated"] as const).map(type => (
+            <button key={type} onClick={() => setReportType(type)}
+              className={`p-4 rounded-xl border-2 transition-all flex items-center gap-4 ${reportType === type ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-slate-300"}`}>
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${reportType === type ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>
+                {type === "single" ? <MapPin className="w-6 h-6" /> : <Building2 className="w-6 h-6" />}
+              </div>
+              <div className="text-left">
+                <p className="font-semibold text-slate-800">{type === "single" ? "Single Branch" : "Consolidated"}</p>
+                <p className="text-sm text-slate-500">{type === "single" ? "Inspect one branch at a time" : "Inspect all 3 branches & compare"}</p>
+              </div>
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className={`grid gap-4 mb-6 ${reportType === "consolidated" ? "grid-cols-5" : "grid-cols-4"}`}>
+      {/* Score Cards */}
+      <div className={`grid gap-4 mb-6 ${reportType === "consolidated" ? "grid-cols-4" : "grid-cols-2"}`}>
         <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-5 text-white">
-          <p className="text-sm opacity-80 mb-1">Overall Compliance</p>
-          <p className="text-3xl font-bold">{overallStats.complianceRate.toFixed(0)}%</p>
+          <p className="text-sm opacity-80 mb-1">Overall Score</p>
+          <p className="text-3xl font-bold">{getOverallScore().toFixed(0)}%</p>
         </div>
-        {reportType === "consolidated" ? (
-          BRANCHES.map(branch => {
-            const stats = getBranchStats(branch);
-            return (
-              <div key={branch} className="bg-white border border-slate-200 rounded-2xl p-5">
-                <p className="text-sm text-slate-500 mb-1">{branch}</p>
-                <p className={`text-2xl font-bold ${
-                  stats.complianceRate >= 80 ? "text-emerald-600" : 
-                  stats.complianceRate >= 60 ? "text-amber-600" : "text-red-600"
-                }`}>
-                  {stats.complianceRate.toFixed(0)}%
-                </p>
-              </div>
-            );
-          })
-        ) : (
-          <>
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
-              <p className="text-sm text-emerald-600 mb-1">Passed</p>
-              <p className="text-2xl font-bold text-emerald-700">{overallStats.passCount}</p>
+        {reportType === "consolidated" ? BRANCHES.map(branch => {
+          const score = getBranchScore(branch);
+          return (
+            <div key={branch} className="bg-white border border-slate-200 rounded-2xl p-5">
+              <p className="text-sm text-slate-500 mb-1">{branch}</p>
+              <p className={`text-2xl font-bold ${score >= 80 ? "text-emerald-600" : score >= 60 ? "text-amber-600" : "text-red-600"}`}>{score.toFixed(0)}%</p>
             </div>
-            <div className="bg-red-50 border border-red-200 rounded-2xl p-5">
-              <p className="text-sm text-red-600 mb-1">Failed</p>
-              <p className="text-2xl font-bold text-red-700">{overallStats.failCount}</p>
-            </div>
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
-              <p className="text-sm text-amber-600 mb-1">Issues</p>
-              <p className="text-2xl font-bold text-amber-700">{issues.length}</p>
-            </div>
-          </>
+          );
+        }) : (
+          <div className="bg-white border border-slate-200 rounded-2xl p-5">
+            <p className="text-sm text-slate-500 mb-1">Issues Found</p>
+            <p className="text-2xl font-bold text-amber-600">{generateIssues().length}</p>
+          </div>
         )}
       </div>
 
       {/* Visit Info */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
         <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-          <MapPin className="w-5 h-5 text-emerald-500" />
-          Visit Information
+          <MapPin className="w-5 h-5 text-emerald-500" /> Visit Information
         </h2>
         <div className={`grid gap-4 ${reportType === "single" ? "grid-cols-3" : "grid-cols-2"}`}>
           {reportType === "single" && (
             <div>
               <label className="block text-sm font-medium text-slate-600 mb-2">Branch</label>
-              <select
-                value={selectedBranch}
-                onChange={(e) => setSelectedBranch(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                {BRANCHES.map(b => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
+              <select value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
               </select>
             </div>
           )}
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-2">Visit Date</label>
-            <input
-              type="date"
-              value={visitDate}
-              onChange={(e) => setVisitDate(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+            <input type="date" value={visitDate} onChange={e => setVisitDate(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-2">Visited By</label>
-            <input
-              type="text"
-              placeholder="Inspector name"
-              value={visitedBy}
-              onChange={(e) => setVisitedBy(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+            <input type="text" placeholder="Inspector name" value={visitedBy} onChange={e => setVisitedBy(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
           </div>
         </div>
       </div>
 
-      {/* Checklist - Branch Tabs for Consolidated */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Inspection Checklist</h2>
+      {/* Branch Tabs */}
+      {reportType === "consolidated" && (
+        <div className="flex gap-2 mb-4">
+          {BRANCHES.map(branch => {
+            const score = getBranchScore(branch);
+            return (
+              <button key={branch} onClick={() => setActiveBranchTab(branch)}
+                className={`flex-1 p-3 rounded-xl font-medium transition-all ${activeBranchTab === branch ? "bg-emerald-50 text-emerald-700 border-2 border-emerald-500" : "bg-white text-slate-600 border-2 border-slate-200 hover:border-slate-300"}`}>
+                {branch}
+                {score > 0 && <span className={`ml-2 text-sm ${score >= 80 ? "text-emerald-600" : score >= 60 ? "text-amber-600" : "text-red-600"}`}>{score.toFixed(0)}%</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-        {reportType === "consolidated" && (
-          <div className="flex gap-2 mb-6">
-            {BRANCHES.map(branch => {
-              const stats = getBranchStats(branch);
-              return (
-                <button
-                  key={branch}
-                  onClick={() => setActiveBranchTab(branch)}
-                  className={`flex-1 p-3 rounded-xl font-medium transition-all ${
-                    activeBranchTab === branch
-                      ? "bg-emerald-50 text-emerald-700 border-2 border-emerald-500"
-                      : "bg-slate-50 text-slate-600 border-2 border-transparent hover:border-slate-200"
-                  }`}
-                >
-                  <span>{branch}</span>
-                  <span className={`ml-2 text-sm ${
-                    stats.complianceRate >= 80 ? "text-emerald-600" : 
-                    stats.complianceRate >= 60 ? "text-amber-600" : "text-red-600"
-                  }`}>
-                    {stats.complianceRate.toFixed(0)}%
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+      {/* ── Inspection Sections ── */}
+      {d && (
+        <div className="space-y-4">
 
-        {Object.entries(groupedChecklist).map(([category, items]) => (
-          <div key={category} className="mb-6">
-            <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">{category}</h3>
+          {/* 1. Exterior */}
+          <SectionCard title="1. Exterior" icon={<MapPin className="w-4 h-4 text-emerald-500" />}>
             <div className="space-y-3">
-              {items.map(item => {
-                const currentBranch = reportType === "single" ? selectedBranch : activeBranchTab;
-                const checkItem = branchChecklist[currentBranch]?.[item.id];
-                return (
-                  <div key={item.id} className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => updateChecklistStatus(currentBranch, item.id, "pass")}
-                        className={`p-2 rounded-lg transition-all ${
-                          checkItem?.status === "pass"
-                            ? "bg-emerald-500 text-white"
-                            : "bg-white border border-slate-200 text-slate-400 hover:border-emerald-300"
-                        }`}
-                      >
-                        <CheckCircle className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => updateChecklistStatus(currentBranch, item.id, "fail")}
-                        className={`p-2 rounded-lg transition-all ${
-                          checkItem?.status === "fail"
-                            ? "bg-red-500 text-white"
-                            : "bg-white border border-slate-200 text-slate-400 hover:border-red-300"
-                        }`}
-                      >
-                        <XCircle className="w-5 h-5" />
-                      </button>
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-slate-800">{item.label}</p>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Notes (optional)"
-                      value={checkItem?.notes || ""}
-                      onChange={(e) => updateChecklistNotes(currentBranch, item.id, e.target.value)}
-                      className="w-48 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                );
-              })}
+              <QualityRow label="Front of shop cleanliness" item={d.exterior.frontCleanliness}
+                onChange={u => upd(p => ({ ...p, exterior: { ...p.exterior, frontCleanliness: { ...p.exterior.frontCleanliness, ...u } } }))} />
+              <BinaryRow label="Signage working" item={d.exterior.signageWorking}
+                onChange={u => upd(p => ({ ...p, exterior: { ...p.exterior, signageWorking: { ...p.exterior.signageWorking, ...u } } }))} />
             </div>
-          </div>
-        ))}
-      </div>
+          </SectionCard>
 
-      {/* Issues Found */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
-        <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-          <AlertTriangle className="w-5 h-5 text-amber-500" />
-          Issues Found
-        </h2>
+          {/* 2. Interior Spaces */}
+          <SectionCard title="2. Interior Spaces" icon={<Building2 className="w-4 h-4 text-emerald-500" />}>
+            <div className="space-y-3">
+              <QualityRow label="Floors (swept/mopped)" item={d.interiorSpaces.floors}
+                onChange={u => upd(p => ({ ...p, interiorSpaces: { ...p.interiorSpaces, floors: { ...p.interiorSpaces.floors, ...u } } }))} />
+              <QualityRow label="Washroom condition" item={d.interiorSpaces.washroom}
+                onChange={u => upd(p => ({ ...p, interiorSpaces: { ...p.interiorSpaces, washroom: { ...p.interiorSpaces.washroom, ...u } } }))} />
+              <QualityRow label="Storeroom condition" item={d.interiorSpaces.storeroom}
+                onChange={u => upd(p => ({ ...p, interiorSpaces: { ...p.interiorSpaces, storeroom: { ...p.interiorSpaces.storeroom, ...u } } }))} />
+            </div>
+          </SectionCard>
 
-        {issues.length > 0 && (
-          <div className="space-y-3 mb-4">
-            {issues.map(issue => (
-              <div
-                key={issue.id}
-                className={`flex items-center gap-4 p-4 rounded-xl border-l-4 ${
-                  issue.priority === "high"
-                    ? "bg-red-50 border-l-red-500"
-                    : issue.priority === "medium"
-                    ? "bg-amber-50 border-l-amber-500"
-                    : "bg-blue-50 border-l-blue-500"
-                }`}
-              >
-                <div className="flex-1">
-                  <p className="font-medium text-slate-800">{issue.description}</p>
-                  <p className="text-sm text-slate-500">
-                    {issue.branch}
-                    {issue.assignedTo && ` • Assigned to: ${issue.assignedTo}`}
-                  </p>
+          {/* 3. Shelves & Products */}
+          <SectionCard title="3. Shelves & Products" icon={<Package className="w-4 h-4 text-emerald-500" />}>
+            <div className="space-y-3">
+              <QualityRow label="Overall shelf appearance (alignment, arrangement, fullness)" item={d.shelvesProducts.overallAppearance}
+                onChange={u => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, overallAppearance: { ...p.shelvesProducts.overallAppearance, ...u } } }))} />
+
+              {/* Individual shelves */}
+              <div className="p-4 bg-slate-50 rounded-xl">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="font-medium text-slate-800 text-sm">Individual shelf cleanliness (per worker)</p>
+                  <button type="button"
+                    onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: [...p.shelvesProducts.individualShelves, { id: Date.now(), workerName: "", shelfArea: "", rating: 0, observation: "" }] } }))}
+                    className="flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-700 font-medium">
+                    <Plus className="w-4 h-4" /> Add shelf
+                  </button>
                 </div>
-                <span
-                  className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                    issue.priority === "high"
-                      ? "bg-red-500 text-white"
-                      : issue.priority === "medium"
-                      ? "bg-amber-500 text-white"
-                      : "bg-blue-500 text-white"
-                  }`}
-                >
-                  {issue.priority.toUpperCase()}
-                </span>
-                <button
-                  onClick={() => removeIssue(issue.id)}
-                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {d.shelvesProducts.individualShelves.length === 0 && <p className="text-sm text-slate-400 italic">No shelves added yet</p>}
+                <div className="space-y-3">
+                  {d.shelvesProducts.individualShelves.map((shelf, idx) => (
+                    <div key={shelf.id} className="bg-white border border-slate-200 rounded-xl p-4">
+                      <div className="flex gap-3 mb-3">
+                        <input type="text" placeholder="Worker name" value={shelf.workerName}
+                          onChange={e => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], workerName: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })}
+                          className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                        <input type="text" placeholder="Shelf area" value={shelf.shelfArea}
+                          onChange={e => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], shelfArea: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })}
+                          className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                        <button type="button"
+                          onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: p.shelvesProducts.individualShelves.filter((_, i) => i !== idx) } }))}
+                          className="p-2 text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                      <RatingButtons value={shelf.rating}
+                        onChange={rating => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], rating }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })} />
+                      <textarea placeholder="Observation..." value={shelf.observation} rows={1}
+                        onChange={e => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], observation: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })}
+                        className="mt-2 w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
-        )}
 
-        <div className="grid grid-cols-5 gap-3 pt-4 border-t border-slate-100">
-          <input
-            type="text"
-            placeholder="Issue description"
-            value={newIssue.description}
-            onChange={(e) => setNewIssue({ ...newIssue, description: e.target.value })}
-            className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-          <select
-            value={newIssue.branch}
-            onChange={(e) => setNewIssue({ ...newIssue, branch: e.target.value })}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            {activeBranches.map(b => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
-          <select
-            value={newIssue.priority}
-            onChange={(e) => setNewIssue({ ...newIssue, priority: e.target.value as "high" | "medium" | "low" })}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          <button
-            onClick={addIssue}
-            className="px-4 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Add
-          </button>
+              {/* Expired drugs */}
+              <BinaryRow label="Expired drugs found" item={d.shelvesProducts.expiredDrugsFound} critical
+                onChange={u => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugsFound: { ...p.shelvesProducts.expiredDrugsFound, ...u } } }))} />
+              {d.shelvesProducts.expiredDrugsFound.value === true && (
+                <div className="ml-4 p-4 bg-red-50 border border-red-200 rounded-xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold text-red-700">Record expired drugs</p>
+                    <button type="button"
+                      onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: [...p.shelvesProducts.expiredDrugs, { id: Date.now(), drugName: "", expiryDate: "", quantity: "", shelfLocation: "" }] } }))}
+                      className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 font-medium"><Plus className="w-4 h-4" /> Add drug</button>
+                  </div>
+                  <div className="space-y-2">
+                    {d.shelvesProducts.expiredDrugs.map((drug, idx) => (
+                      <div key={drug.id} className="bg-white border border-red-100 rounded-lg p-3 grid grid-cols-4 gap-2">
+                        <input type="text" placeholder="Drug name" value={drug.drugName}
+                          onChange={e => upd(p => { const dr = [...p.shelvesProducts.expiredDrugs]; dr[idx] = { ...dr[idx], drugName: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: dr } }; })}
+                          className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300" />
+                        <input type="date" value={drug.expiryDate}
+                          onChange={e => upd(p => { const dr = [...p.shelvesProducts.expiredDrugs]; dr[idx] = { ...dr[idx], expiryDate: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: dr } }; })}
+                          className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300" />
+                        <input type="text" placeholder="Qty" value={drug.quantity}
+                          onChange={e => upd(p => { const dr = [...p.shelvesProducts.expiredDrugs]; dr[idx] = { ...dr[idx], quantity: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: dr } }; })}
+                          className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300" />
+                        <div className="flex gap-2">
+                          <input type="text" placeholder="Shelf / location" value={drug.shelfLocation}
+                            onChange={e => upd(p => { const dr = [...p.shelvesProducts.expiredDrugs]; dr[idx] = { ...dr[idx], shelfLocation: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: dr } }; })}
+                            className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300" />
+                          <button type="button"
+                            onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: p.shelvesProducts.expiredDrugs.filter((_, i) => i !== idx) } }))}
+                            className="p-2 text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Near-expiry */}
+              <BinaryRow label="Near-expiry items found" item={d.shelvesProducts.nearExpiryFound}
+                onChange={u => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryFound: { ...p.shelvesProducts.nearExpiryFound, ...u } } }))} />
+              {d.shelvesProducts.nearExpiryFound.value === true && (
+                <div className="ml-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold text-amber-700">Record near-expiry items</p>
+                    <button type="button"
+                      onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: [...p.shelvesProducts.nearExpiryItems, { id: Date.now(), drugName: "", expiryDate: "", quantity: "", stickerApplied: null }] } }))}
+                      className="flex items-center gap-1 text-sm text-amber-600 hover:text-amber-700 font-medium"><Plus className="w-4 h-4" /> Add item</button>
+                  </div>
+                  <div className="space-y-2">
+                    {d.shelvesProducts.nearExpiryItems.map((item, idx) => (
+                      <div key={item.id} className="bg-white border border-amber-100 rounded-lg p-3 grid grid-cols-5 gap-2 items-center">
+                        <input type="text" placeholder="Drug name" value={item.drugName}
+                          onChange={e => upd(p => { const ni = [...p.shelvesProducts.nearExpiryItems]; ni[idx] = { ...ni[idx], drugName: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: ni } }; })}
+                          className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                        <input type="date" value={item.expiryDate}
+                          onChange={e => upd(p => { const ni = [...p.shelvesProducts.nearExpiryItems]; ni[idx] = { ...ni[idx], expiryDate: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: ni } }; })}
+                          className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                        <input type="text" placeholder="Qty" value={item.quantity}
+                          onChange={e => upd(p => { const ni = [...p.shelvesProducts.nearExpiryItems]; ni[idx] = { ...ni[idx], quantity: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: ni } }; })}
+                          className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                        <div className="flex gap-1 items-center justify-center">
+                          <span className="text-xs text-slate-500 shrink-0">Sticker:</span>
+                          <button type="button"
+                            onClick={() => upd(p => { const ni = [...p.shelvesProducts.nearExpiryItems]; ni[idx] = { ...ni[idx], stickerApplied: ni[idx].stickerApplied === true ? null : true }; return { ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: ni } }; })}
+                            className={`px-2 py-1 rounded text-xs font-semibold ${item.stickerApplied === true ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>Yes</button>
+                          <button type="button"
+                            onClick={() => upd(p => { const ni = [...p.shelvesProducts.nearExpiryItems]; ni[idx] = { ...ni[idx], stickerApplied: ni[idx].stickerApplied === false ? null : false }; return { ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: ni } }; })}
+                            className={`px-2 py-1 rounded text-xs font-semibold ${item.stickerApplied === false ? "bg-amber-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>No</button>
+                        </div>
+                        <button type="button"
+                          onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: p.shelvesProducts.nearExpiryItems.filter((_, i) => i !== idx) } }))}
+                          className="p-2 text-amber-400 hover:text-red-500 justify-self-end"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <QualityRow label="Counter area cleanliness" item={d.shelvesProducts.counterCleanliness}
+                onChange={u => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, counterCleanliness: { ...p.shelvesProducts.counterCleanliness, ...u } } }))} />
+            </div>
+          </SectionCard>
+
+          {/* 4. Inventory */}
+          <SectionCard title="4. Inventory" icon={<ShoppingCart className="w-4 h-4 text-emerald-500" />}>
+            <div className="p-4 bg-slate-50 rounded-xl">
+              <div className="flex items-center justify-between mb-3">
+                <p className="font-medium text-slate-800 text-sm">Notable out-of-stock items</p>
+                <button type="button"
+                  onClick={() => upd(p => ({ ...p, inventory: { outOfStockItems: [...p.inventory.outOfStockItems, { id: Date.now(), productName: "", duration: "" }] } }))}
+                  className="flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-700 font-medium"><Plus className="w-4 h-4" /> Add item</button>
+              </div>
+              {d.inventory.outOfStockItems.length === 0 && <p className="text-sm text-slate-400 italic">No out-of-stock items to record</p>}
+              <div className="space-y-2">
+                {d.inventory.outOfStockItems.map((item, idx) => (
+                  <div key={item.id} className="flex gap-2">
+                    <input type="text" placeholder="Product name" value={item.productName}
+                      onChange={e => upd(p => { const oos = [...p.inventory.outOfStockItems]; oos[idx] = { ...oos[idx], productName: e.target.value }; return { ...p, inventory: { outOfStockItems: oos } }; })}
+                      className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    <input type="text" placeholder="How long out of stock" value={item.duration}
+                      onChange={e => upd(p => { const oos = [...p.inventory.outOfStockItems]; oos[idx] = { ...oos[idx], duration: e.target.value }; return { ...p, inventory: { outOfStockItems: oos } }; })}
+                      className="w-44 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    <button type="button"
+                      onClick={() => upd(p => ({ ...p, inventory: { outOfStockItems: p.inventory.outOfStockItems.filter((_, i) => i !== idx) } }))}
+                      className="p-2 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* 5. Systems & Connectivity */}
+          <SectionCard title="5. Systems & Connectivity" icon={<Wifi className="w-4 h-4 text-emerald-500" />}>
+            <div className="space-y-3">
+              <BinaryRow label="POS / PC operational" item={d.systems.posOperational}
+                onChange={u => upd(p => ({ ...p, systems: { ...p.systems, posOperational: { ...p.systems.posOperational, ...u } } }))} />
+              <BinaryRow label="No pending transfers on LavaBMS" item={d.systems.noPendingTransfers} critical
+                onChange={u => upd(p => ({ ...p, systems: { ...p.systems, noPendingTransfers: { ...p.systems.noPendingTransfers, ...u } } }))} />
+              <BinaryRow label="Internet connectivity" item={d.systems.internetConnectivity}
+                onChange={u => upd(p => ({ ...p, systems: { ...p.systems, internetConnectivity: { ...p.systems.internetConnectivity, ...u } } }))} />
+              <BinaryRow label="Mobile devices charged" item={d.systems.devicesCharged}
+                onChange={u => upd(p => ({ ...p, systems: { ...p.systems, devicesCharged: { ...p.systems.devicesCharged, ...u } } }))} />
+              <BinaryRow label="Airtime / call credit available" item={d.systems.airtimeAvailable}
+                onChange={u => upd(p => ({ ...p, systems: { ...p.systems, airtimeAvailable: { ...p.systems.airtimeAvailable, ...u } } }))} />
+            </div>
+          </SectionCard>
+
+          {/* 6. Personnel */}
+          <SectionCard title="6. Personnel" icon={<Users className="w-4 h-4 text-emerald-500" />}>
+            <div className="space-y-3">
+              <div className="p-4 bg-slate-50 rounded-xl">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="font-medium text-slate-800 text-sm">Staff attendance & compliance</p>
+                  <button type="button"
+                    onClick={() => upd(p => ({ ...p, personnel: { ...p.personnel, staffEntries: [...p.personnel.staffEntries, { id: Date.now(), name: "", present: null, inLabCoat: null }] } }))}
+                    className="flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-700 font-medium"><Plus className="w-4 h-4" /> Add staff</button>
+                </div>
+                {d.personnel.staffEntries.length === 0 && <p className="text-sm text-slate-400 italic">No staff added yet</p>}
+                <div className="space-y-2">
+                  {d.personnel.staffEntries.map((staff, idx) => (
+                    <div key={staff.id} className="bg-white border border-slate-200 rounded-xl p-3 flex items-center gap-3 flex-wrap">
+                      <input type="text" placeholder="Staff name" value={staff.name}
+                        onChange={e => upd(p => { const se = [...p.personnel.staffEntries]; se[idx] = { ...se[idx], name: e.target.value }; return { ...p, personnel: { ...p.personnel, staffEntries: se } }; })}
+                        className="flex-1 min-w-32 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-500">Present:</span>
+                        {[true, false].map(val => (
+                          <button key={String(val)} type="button"
+                            onClick={() => upd(p => { const se = [...p.personnel.staffEntries]; se[idx] = { ...se[idx], present: se[idx].present === val ? null : val }; return { ...p, personnel: { ...p.personnel, staffEntries: se } }; })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${staff.present === val ? (val ? "bg-emerald-500 text-white" : "bg-red-500 text-white") : "bg-white border border-slate-200 text-slate-500"}`}>
+                            {val ? "Yes" : "No"}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-500">Lab coat:</span>
+                        {[true, false].map(val => (
+                          <button key={String(val)} type="button"
+                            onClick={() => upd(p => { const se = [...p.personnel.staffEntries]; se[idx] = { ...se[idx], inLabCoat: se[idx].inLabCoat === val ? null : val }; return { ...p, personnel: { ...p.personnel, staffEntries: se } }; })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${staff.inLabCoat === val ? (val ? "bg-emerald-500 text-white" : "bg-amber-500 text-white") : "bg-white border border-slate-200 text-slate-500"}`}>
+                            {val ? "Yes" : "No"}
+                          </button>
+                        ))}
+                      </div>
+                      <button type="button"
+                        onClick={() => upd(p => ({ ...p, personnel: { ...p.personnel, staffEntries: p.personnel.staffEntries.filter((_, i) => i !== idx) } }))}
+                        className="p-2 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <QualityRow label="Staff attitude & engagement" item={d.personnel.staffAttitude}
+                onChange={u => upd(p => ({ ...p, personnel: { ...p.personnel, staffAttitude: { ...p.personnel.staffAttitude, ...u } } }))} />
+            </div>
+          </SectionCard>
+
+          {/* 7. Utilities & Equipment */}
+          <SectionCard title="7. Utilities & Equipment" icon={<Settings className="w-4 h-4 text-emerald-500" />}>
+            <div className="space-y-3">
+              <BinaryRow label="AC working" item={d.utilities.acWorking}
+                onChange={u => upd(p => ({ ...p, utilities: { ...p.utilities, acWorking: { ...p.utilities.acWorking, ...u } } }))} />
+              <BinaryRow label="Fridge working" item={d.utilities.fridgeWorking} critical
+                onChange={u => upd(p => ({ ...p, utilities: { ...p.utilities, fridgeWorking: { ...p.utilities.fridgeWorking, ...u } } }))} />
+              <BinaryRow label="Light bulbs all functional" item={d.utilities.lightBulbsFunctional}
+                onChange={u => upd(p => ({ ...p, utilities: { ...p.utilities, lightBulbsFunctional: { ...p.utilities.lightBulbsFunctional, ...u } } }))} />
+            </div>
+          </SectionCard>
+
+          {/* 8. Documentation */}
+          <SectionCard title="8. Documentation" icon={<FileText className="w-4 h-4 text-emerald-500" />}>
+            <BinaryRow label="Handover book signed off properly (previous shift)" item={d.documentation.handoverBookSignedOff}
+              onChange={u => upd(p => ({ ...p, documentation: { handoverBookSignedOff: { ...p.documentation.handoverBookSignedOff, ...u } } }))} />
+          </SectionCard>
+
+          {/* 9. Security */}
+          <SectionCard title="9. Security" icon={<Shield className="w-4 h-4 text-emerald-500" />}>
+            <div className="space-y-3">
+              <BinaryRow label="CCTV operational" item={d.security.cctvOperational}
+                onChange={u => upd(p => ({ ...p, security: { ...p.security, cctvOperational: { ...p.security.cctvOperational, ...u } } }))} />
+              <BinaryRow label="Safe / cash box secured" item={d.security.safeCashBoxSecured}
+                onChange={u => upd(p => ({ ...p, security: { ...p.security, safeCashBoxSecured: { ...p.security.safeCashBoxSecured, ...u } } }))} />
+            </div>
+          </SectionCard>
+
+          {/* 10. Admin & Communication */}
+          <SectionCard title="10. Admin & Communication" icon={<MessageSquare className="w-4 h-4 text-emerald-500" />}>
+            <div className="space-y-3">
+              <BinaryRow label="All messages replied" item={d.adminComms.allMessagesReplied}
+                onChange={u => upd(p => ({ ...p, adminComms: { ...p.adminComms, allMessagesReplied: { ...p.adminComms.allMessagesReplied, ...u } } }))} />
+              <BinaryRow label="Daily sales report submitted" item={d.adminComms.dailySalesReportSubmitted}
+                onChange={u => upd(p => ({ ...p, adminComms: { ...p.adminComms, dailySalesReportSubmitted: { ...p.adminComms.dailySalesReportSubmitted, ...u } } }))} />
+              <BinaryRow label="Customer complaints since last visit" item={d.adminComms.customerComplaints}
+                onChange={u => upd(p => ({ ...p, adminComms: { ...p.adminComms, customerComplaints: { ...p.adminComms.customerComplaints, ...u } } }))} />
+            </div>
+          </SectionCard>
+
+          {/* 11. Petty Cash */}
+          <SectionCard title="11. Petty Cash" icon={<DollarSign className="w-4 h-4 text-emerald-500" />}>
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-2">Opening Balance (GHS)</label>
+                <input type="number" placeholder="0.00" value={d.pettyCash.openingBalance}
+                  onChange={e => upd(p => ({ ...p, pettyCash: { ...p.pettyCash, openingBalance: e.target.value } }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-2">Amount Spent (GHS)</label>
+                <input type="number" placeholder="0.00" value={d.pettyCash.amountSpent}
+                  onChange={e => upd(p => ({ ...p, pettyCash: { ...p.pettyCash, amountSpent: e.target.value } }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-2">Closing Balance (GHS)</label>
+                <div className="w-full bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-emerald-800 font-semibold">
+                  {d.pettyCash.openingBalance && d.pettyCash.amountSpent
+                    ? `GHS ${(parseFloat(d.pettyCash.openingBalance) - parseFloat(d.pettyCash.amountSpent)).toFixed(2)}`
+                    : "—"}
+                </div>
+              </div>
+            </div>
+            <label className="block text-sm font-medium text-slate-600 mb-2">What was it spent on?</label>
+            <textarea placeholder="Describe what petty cash was used for..." value={d.pettyCash.notes} rows={3}
+              onChange={e => upd(p => ({ ...p, pettyCash: { ...p.pettyCash, notes: e.target.value } }))}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
+          </SectionCard>
+
         </div>
-      </div>
+      )}
 
       {/* Action Items */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Action Items</h2>
-
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mt-4 mb-6">
+        <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+          <AlertTriangle className="w-5 h-5 text-amber-500" /> Action Items
+        </h2>
         {actionItems.length > 0 && (
           <div className="space-y-3 mb-4">
             {actionItems.map(action => (
               <div key={action.id} className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl">
                 <div className="flex-1">
                   <p className="font-medium text-slate-800">{action.action}</p>
-                  <p className="text-sm text-slate-500">
-                    {action.branch}
-                    {action.responsible && ` • ${action.responsible}`}
-                    {action.dueDate && ` • Due: ${formatDate(action.dueDate)}`}
-                  </p>
+                  <p className="text-sm text-slate-500">{action.branch}{action.responsible && ` • ${action.responsible}`}{action.dueDate && ` • Due: ${formatDate(action.dueDate)}`}</p>
                 </div>
-                <button
-                  onClick={() => removeActionItem(action.id)}
-                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <button onClick={() => setActionItems(prev => prev.filter(a => a.id !== action.id))}
+                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
               </div>
             ))}
           </div>
         )}
-
         <div className="grid grid-cols-5 gap-3 pt-4 border-t border-slate-100">
-          <input
-            type="text"
-            placeholder="Action to take"
-            value={newAction.action}
-            onChange={(e) => setNewAction({ ...newAction, action: e.target.value })}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-          <select
-            value={newAction.branch}
-            onChange={(e) => setNewAction({ ...newAction, branch: e.target.value })}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            {activeBranches.map(b => (
-              <option key={b} value={b}>{b}</option>
-            ))}
+          <input type="text" placeholder="Action to take" value={newAction.action} onChange={e => setNewAction({ ...newAction, action: e.target.value })}
+            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          <select value={newAction.branch} onChange={e => setNewAction({ ...newAction, branch: e.target.value })}
+            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            {activeBranches.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
-          <input
-            type="text"
-            placeholder="Responsible"
-            value={newAction.responsible}
-            onChange={(e) => setNewAction({ ...newAction, responsible: e.target.value })}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-          <input
-            type="date"
-            value={newAction.dueDate}
-            onChange={(e) => setNewAction({ ...newAction, dueDate: e.target.value })}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-          <button
-            onClick={addActionItem}
-            className="px-4 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Add
+          <input type="text" placeholder="Responsible" value={newAction.responsible} onChange={e => setNewAction({ ...newAction, responsible: e.target.value })}
+            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          <input type="date" value={newAction.dueDate} onChange={e => setNewAction({ ...newAction, dueDate: e.target.value })}
+            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          <button onClick={() => { if (newAction.action) { setActionItems(prev => [...prev, { ...newAction, id: Date.now() }]); setNewAction({ action: "", dueDate: "", responsible: "", branch: currentBranch }); } }}
+            className="px-4 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+            <Plus className="w-4 h-4" /> Add
           </button>
         </div>
       </div>
 
-      {/* Ratings & Notes */}
+      {/* General Notes */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
-        <div className="grid grid-cols-2 gap-6">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-4">Branch Ratings</h2>
-            <div className="space-y-4">
-              {activeBranches.map(branch => (
-                <div key={branch} className="flex items-center gap-4">
-                  <span className="w-24 font-medium text-slate-700">{branch}</span>
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map(star => (
-                      <button
-                        key={star}
-                        onClick={() => setBranchRatings(prev => ({ ...prev, [branch]: star }))}
-                        className={`text-2xl transition-transform hover:scale-110 ${
-                          star <= branchRatings[branch] ? "opacity-100" : "opacity-30"
-                        }`}
-                      >
-                        ⭐
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-4">General Notes</h2>
-            <textarea
-              placeholder="Additional observations or comments..."
-              value={generalNotes}
-              onChange={(e) => setGeneralNotes(e.target.value)}
-              rows={5}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
-            />
-          </div>
-        </div>
+        <h2 className="text-lg font-semibold text-slate-800 mb-4">General Notes</h2>
+        <textarea placeholder="Additional observations or comments..." value={generalNotes} rows={4}
+          onChange={e => setGeneralNotes(e.target.value)}
+          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
       </div>
 
-      {/* Action Buttons */}
+      {/* Buttons */}
       <div className="flex justify-between">
-        <button
-          onClick={clearForm}
-          className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors"
-        >
-          Clear Form
-        </button>
+        <button onClick={clearForm} className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors">Clear Form</button>
         <div className="flex gap-4">
-          <button
-            onClick={() => setShowPreview(true)}
-            className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center gap-2"
-          >
-            <Eye className="w-4 h-4" />
-            Preview
+          <button onClick={() => setShowPreview(true)} className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center gap-2">
+            <Eye className="w-4 h-4" /> Preview
           </button>
-          <button
-            onClick={saveReport}
-            className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-400 to-green-500 text-white font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/30 transition-all flex items-center gap-2"
-          >
-            <Save className="w-4 h-4" />
-            {reportId ? "Update Report" : "Save Report"}
+          <button onClick={saveReport} disabled={saving}
+            className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-400 to-green-500 text-white font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
+            <Save className="w-4 h-4" /> {saving ? "Saving…" : reportId ? "Update Report" : "Save Report"}
           </button>
         </div>
       </div>
@@ -921,210 +968,95 @@ export default function BranchVisitPage() {
       {/* Preview Modal */}
       {showPreview && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-5xl w-full max-h-[95vh] overflow-y-auto shadow-2xl">
-            {/* Header */}
+          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[95vh] overflow-y-auto shadow-2xl">
             <div className="bg-white border-b border-slate-100 px-8 py-6 flex items-center justify-between sticky top-0 z-10">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg">
-                  {reportType === "consolidated" ? (
-                    <Building2 className="w-6 h-6 text-white" />
-                  ) : (
-                    <MapPin className="w-6 h-6 text-white" />
-                  )}
+                  <MapPin className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-800">
+                  <h2 className="text-xl font-bold text-slate-800">
                     Branch Visit Report
-                    {reportType === "consolidated" && (
-                      <span className="ml-2 text-sm bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full">
-                        CONSOLIDATED
-                      </span>
-                    )}
+                    {reportType === "consolidated" && <span className="ml-2 text-sm bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full">CONSOLIDATED</span>}
                   </h2>
-                  <p className="text-slate-500">
-                    {reportType === "consolidated" ? "All Branches" : selectedBranch} • {formatDate(visitDate)}
-                  </p>
+                  <p className="text-slate-500 text-sm">{reportType === "consolidated" ? "All Branches" : selectedBranch} • {formatDate(visitDate)} • {visitedBy}</p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowPreview(false)}
-                className="p-3 hover:bg-slate-100 rounded-2xl transition-colors"
-              >
-                <X className="w-5 h-5 text-slate-400" />
-              </button>
+              <button onClick={() => setShowPreview(false)} className="p-3 hover:bg-slate-100 rounded-2xl transition-colors"><X className="w-5 h-5 text-slate-400" /></button>
             </div>
-
-            {/* Content */}
-            <div className="p-8">
-              {/* Stats */}
-              <div className={`grid gap-4 mb-8 ${reportType === "consolidated" ? "grid-cols-4" : "grid-cols-4"}`}>
-                <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-6 text-white text-center">
-                  <p className="text-4xl font-bold">{overallStats.complianceRate.toFixed(0)}%</p>
-                  <p className="text-sm opacity-80 mt-1">Overall Compliance</p>
+            <div className="p-8 space-y-6">
+              {/* Scores */}
+              <div className={`grid gap-4 ${reportType === "consolidated" ? "grid-cols-4" : "grid-cols-2"}`}>
+                <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-5 text-white text-center">
+                  <p className="text-3xl font-bold">{getOverallScore().toFixed(0)}%</p>
+                  <p className="text-sm opacity-80 mt-1">Overall Score</p>
                 </div>
-                {reportType === "consolidated" ? (
-                  BRANCHES.map(branch => {
-                    const stats = getBranchStats(branch);
-                    return (
-                      <div key={branch} className="bg-slate-50 rounded-2xl p-6 text-center">
-                        <p className={`text-3xl font-bold ${
-                          stats.complianceRate >= 80 ? "text-emerald-600" :
-                          stats.complianceRate >= 60 ? "text-amber-600" : "text-red-600"
-                        }`}>
-                          {stats.complianceRate.toFixed(0)}%
-                        </p>
-                        <p className="text-sm text-slate-500 mt-1">{branch}</p>
-                        <p className="text-xs text-slate-400 mt-2">⭐ {branchRatings[branch]}/5</p>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <>
-                    <div className="bg-emerald-50 rounded-2xl p-6 text-center">
-                      <p className="text-3xl font-bold text-emerald-600">{overallStats.passCount}</p>
-                      <p className="text-sm text-emerald-700">Passed</p>
+                {reportType === "consolidated" ? BRANCHES.map(branch => {
+                  const score = getBranchScore(branch);
+                  return (
+                    <div key={branch} className="bg-slate-50 rounded-2xl p-5 text-center">
+                      <p className={`text-2xl font-bold ${score >= 80 ? "text-emerald-600" : score >= 60 ? "text-amber-600" : "text-red-600"}`}>{score.toFixed(0)}%</p>
+                      <p className="text-sm text-slate-500 mt-1">{branch}</p>
                     </div>
-                    <div className="bg-red-50 rounded-2xl p-6 text-center">
-                      <p className="text-3xl font-bold text-red-600">{overallStats.failCount}</p>
-                      <p className="text-sm text-red-700">Failed</p>
-                    </div>
-                    <div className="bg-amber-50 rounded-2xl p-6 text-center">
-                      <p className="text-3xl font-bold text-amber-600">{branchRatings[selectedBranch]}/5</p>
-                      <p className="text-sm text-amber-700">Rating</p>
-                    </div>
-                  </>
+                  );
+                }) : (
+                  <div className="bg-slate-50 rounded-2xl p-5 text-center">
+                    <p className="text-2xl font-bold text-amber-600">{generateIssues().length}</p>
+                    <p className="text-sm text-slate-500 mt-1">Issues Found</p>
+                  </div>
                 )}
               </div>
 
-              {/* Comparison Table for Consolidated */}
-              {reportType === "consolidated" && (
-                <div className="bg-slate-50 rounded-2xl p-6 mb-6 overflow-x-auto">
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4">Branch Comparison</h3>
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b-2 border-slate-200">
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-600">Checklist Item</th>
-                        {BRANCHES.map(b => (
-                          <th key={b} className="text-center py-3 px-4 text-sm font-semibold text-slate-600">{b}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {CHECKLIST_ITEMS.map(item => (
-                        <tr key={item.id} className="border-b border-slate-100">
-                          <td className="py-3 px-4 text-sm text-slate-700">{item.label}</td>
-                          {BRANCHES.map(branch => {
-                            const check = branchChecklist[branch]?.[item.id];
-                            return (
-                              <td key={branch} className="py-3 px-4 text-center">
-                                <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                                  check?.status === "pass" ? "bg-emerald-100 text-emerald-700" :
-                                  check?.status === "fail" ? "bg-red-100 text-red-700" :
-                                  "bg-slate-200 text-slate-500"
-                                }`}>
-                                  {check?.status.toUpperCase() || "N/A"}
-                                </span>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Single Branch Checklist */}
-              {reportType === "single" && (
-                <div className="bg-slate-50 rounded-2xl p-6 mb-6">
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4">Inspection Results - {selectedBranch}</h3>
-                  {Object.entries(groupedChecklist).map(([category, items]) => (
-                    <div key={category} className="mb-4">
-                      <h4 className="text-sm font-semibold text-slate-500 uppercase mb-2">{category}</h4>
-                      {items.map(item => {
-                        const check = branchChecklist[selectedBranch]?.[item.id];
-                        return (
-                          <div key={item.id} className="flex items-center gap-3 py-2 border-b border-slate-200 last:border-0">
-                            <span className={`w-16 text-center text-xs font-semibold px-2 py-1 rounded-full ${
-                              check?.status === "pass" ? "bg-emerald-100 text-emerald-700" :
-                              check?.status === "fail" ? "bg-red-100 text-red-700" :
-                              "bg-slate-200 text-slate-600"
-                            }`}>
-                              {check?.status.toUpperCase() || "N/A"}
-                            </span>
-                            <span className="flex-1 text-slate-700">{item.label}</span>
-                            {check?.notes && (
-                              <span className="text-sm text-slate-500 italic">{check.notes}</span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Issues & Actions */}
-              {(issues.length > 0 || actionItems.length > 0) && (
-                <div className="grid grid-cols-2 gap-6 mb-6">
-                  {issues.length > 0 && (
-                    <div>
-                      <h3 className="text-lg font-semibold text-slate-800 mb-4">Issues ({issues.length})</h3>
-                      <div className="space-y-2">
-                        {issues.map(issue => (
-                          <div key={issue.id} className={`p-3 rounded-lg border-l-4 ${
-                            issue.priority === "high" ? "bg-red-50 border-l-red-500" :
-                            issue.priority === "medium" ? "bg-amber-50 border-l-amber-500" :
-                            "bg-blue-50 border-l-blue-500"
-                          }`}>
+              {/* Auto-flagged issues */}
+              {(() => {
+                const issues = generateIssues();
+                if (issues.length === 0) return null;
+                return (
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-800 mb-3">Auto-Flagged Issues ({issues.length})</h3>
+                    <div className="space-y-2">
+                      {issues.map(issue => (
+                        <div key={issue.id} className={`p-3 rounded-lg border-l-4 ${issue.priority === "high" ? "bg-red-50 border-l-red-500" : "bg-amber-50 border-l-amber-500"}`}>
+                          <div className="flex items-start justify-between gap-2">
                             <p className="text-sm font-medium text-slate-800">{issue.description}</p>
-                            <p className="text-xs text-slate-500">{issue.branch}</p>
+                            <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${issue.priority === "high" ? "bg-red-500 text-white" : "bg-amber-500 text-white"}`}>{issue.priority.toUpperCase()}</span>
                           </div>
-                        ))}
-                      </div>
+                          <p className="text-xs text-slate-500 mt-1">{issue.branch}{issue.assignedTo && ` • ${issue.assignedTo}`}</p>
+                        </div>
+                      ))}
                     </div>
-                  )}
-                  {actionItems.length > 0 && (
-                    <div>
-                      <h3 className="text-lg font-semibold text-slate-800 mb-4">Actions ({actionItems.length})</h3>
-                      <div className="space-y-2">
-                        {actionItems.map(action => (
-                          <div key={action.id} className="p-3 bg-slate-50 rounded-lg">
-                            <p className="text-sm font-medium text-slate-800">{action.action}</p>
-                            <p className="text-xs text-slate-500">{action.branch} • {action.responsible}</p>
-                          </div>
-                        ))}
+                  </div>
+                );
+              })()}
+
+              {/* Action Items */}
+              {actionItems.length > 0 && (
+                <div>
+                  <h3 className="text-base font-semibold text-slate-800 mb-3">Action Items ({actionItems.length})</h3>
+                  <div className="space-y-2">
+                    {actionItems.map(action => (
+                      <div key={action.id} className="p-3 bg-slate-50 rounded-lg border-l-4 border-l-blue-400">
+                        <p className="text-sm font-medium text-slate-800">{action.action}</p>
+                        <p className="text-xs text-slate-500 mt-1">{action.branch}{action.responsible && ` • ${action.responsible}`}{action.dueDate && ` • Due: ${formatDate(action.dueDate)}`}</p>
                       </div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
                 </div>
               )}
 
-              {/* Notes */}
               {generalNotes && (
-                <div className="bg-slate-50 rounded-2xl p-6">
-                  <h3 className="text-lg font-semibold text-slate-800 mb-2">General Notes</h3>
-                  <p className="text-slate-600 whitespace-pre-wrap">{generalNotes}</p>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-800 mb-2">General Notes</h3>
+                  <div className="bg-slate-50 rounded-xl p-4"><p className="text-slate-600 whitespace-pre-wrap text-sm">{generalNotes}</p></div>
                 </div>
               )}
             </div>
-
-            {/* Footer */}
             <div className="border-t border-slate-100 px-8 py-5 flex justify-between items-center">
               <p className="text-sm text-slate-400">Visited by: {visitedBy}</p>
               <div className="flex gap-3">
-                <button
-                  onClick={() => setShowPreview(false)}
-                  className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={exportPDF}
-                  className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 transition-colors flex items-center gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  Export PDF
+                <button onClick={() => setShowPreview(false)} className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors">Close</button>
+                <button onClick={exportPDF} className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 transition-colors flex items-center gap-2">
+                  <Download className="w-4 h-4" /> Export PDF
                 </button>
               </div>
             </div>
@@ -1134,4 +1066,8 @@ export default function BranchVisitPage() {
     </div>
     </ProtectedLayout>
   );
+}
+
+export default function BranchVisitPage() {
+  return <Suspense><BranchVisitContent /></Suspense>;
 }

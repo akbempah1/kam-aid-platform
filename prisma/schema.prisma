@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model MonthlyReport {
+  id             Int      @id @default(autoincrement())
+  month          Int
+  year           Int
+  sales          Json
+  cogs           String
+  expenses       Json
+  customExpenses Json     @default("[]")
+  totals         Json
+  createdAt      DateTime @default(now())
+
+  @@unique([month, year])
+}
+
+model WeeklyReport {
+  id          Int      @id @default(autoincrement())
+  weekStart   DateTime
+  weekEnd     DateTime
+  dailySales  Json
+  expenses    Json     @default("[]")
+  issues      Json     @default("[]")
+  totals      Json
+  createdAt   DateTime @default(now())
+}
+
+model BranchVisit {
+  id              Int      @id @default(autoincrement())
+  reportType      String
+  visitDate       DateTime
+  branch          String?
+  visitedBy       String
+  branchChecklist Json     @default("{}")
+  issues          Json     @default("[]")
+  actionItems     Json     @default("[]")
+  branchRatings   Json     @default("{}")
+  generalNotes    String   @default("")
+  stats           Json
+  createdAt       DateTime @default(now())
+}
+
+model ShortagesReport {
+  id         Int      @id @default(autoincrement())
+  reportDate DateTime
+  reportedBy String
+  shortages  Json     @default("[]")
+  stats      Json
+  createdAt  DateTime @default(now())
+}

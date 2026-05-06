@@ -3,6 +3,7 @@ import ProtectedLayout from "../components/ProtectedLayout";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Pencil, Calendar, LayoutDashboard, MapPin, Package } from "lucide-react";
+import * as dataService from "@/lib/dataService";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -50,52 +51,53 @@ export default function HistoryPage() {
   const [branchVisits, setBranchVisits] = useState<BranchVisitReport[]>([]);
   const [shortagesReports, setShortagesReports] = useState<ShortagesReport[]>([]);
   const [activeTab, setActiveTab] = useState<"monthly" | "weekly" | "branch" | "shortages">("monthly");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  // Load all reports from localStorage
+  // Load all reports from database
   useEffect(() => {
-    const savedMonthly = JSON.parse(localStorage.getItem("kam_aid_reports") || "[]");
-    const savedWeekly = JSON.parse(localStorage.getItem("kam_aid_weekly_reports") || "[]");
-    const savedBranchVisits = JSON.parse(localStorage.getItem("kam_aid_branch_visits") || "[]");
-    const savedShortages = JSON.parse(localStorage.getItem("kam_aid_shortages") || "[]");
-
-    // Sort by date, newest first
-    savedMonthly.sort((a: MonthlyReport, b: MonthlyReport) => b.id - a.id);
-    savedWeekly.sort((a: WeeklyReport, b: WeeklyReport) => b.id - a.id);
-    savedBranchVisits.sort((a: BranchVisitReport, b: BranchVisitReport) => b.id - a.id);
-    savedShortages.sort((a: ShortagesReport, b: ShortagesReport) => b.id - a.id);
-
-    setMonthlyReports(savedMonthly);
-    setWeeklyReports(savedWeekly);
-    setBranchVisits(savedBranchVisits);
-    setShortagesReports(savedShortages);
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      dataService.monthlyReports.list(),
+      dataService.weeklyReports.list(),
+      dataService.branchVisits.list(),
+      dataService.shortagesReports.list(),
+    ]).then(([monthly, weekly, visits, shortages]) => {
+      setMonthlyReports(monthly as MonthlyReport[]);
+      setWeeklyReports(weekly as WeeklyReport[]);
+      setBranchVisits(visits as BranchVisitReport[]);
+      setShortagesReports(shortages as ShortagesReport[]);
+    }).catch((e: unknown) => {
+      setError(e instanceof Error ? e.message : "Failed to load reports. Please try refreshing.");
+    }).finally(() => setLoading(false));
   }, []);
 
   // Delete functions
-  const deleteReport = (type: string, id: number) => {
+  const deleteReport = async (type: string, id: number) => {
     if (!confirm("Are you sure you want to delete this report?")) return;
-
-    switch (type) {
-      case "monthly":
-        const updatedMonthly = monthlyReports.filter((r) => r.id !== id);
-        setMonthlyReports(updatedMonthly);
-        localStorage.setItem("kam_aid_reports", JSON.stringify(updatedMonthly));
-        break;
-      case "weekly":
-        const updatedWeekly = weeklyReports.filter((r) => r.id !== id);
-        setWeeklyReports(updatedWeekly);
-        localStorage.setItem("kam_aid_weekly_reports", JSON.stringify(updatedWeekly));
-        break;
-      case "branch":
-        const updatedBranch = branchVisits.filter((r) => r.id !== id);
-        setBranchVisits(updatedBranch);
-        localStorage.setItem("kam_aid_branch_visits", JSON.stringify(updatedBranch));
-        break;
-      case "shortages":
-        const updatedShortages = shortagesReports.filter((r) => r.id !== id);
-        setShortagesReports(updatedShortages);
-        localStorage.setItem("kam_aid_shortages", JSON.stringify(updatedShortages));
-        break;
+    try {
+      switch (type) {
+        case "monthly":
+          await dataService.monthlyReports.remove(id);
+          setMonthlyReports(monthlyReports.filter((r) => r.id !== id));
+          break;
+        case "weekly":
+          await dataService.weeklyReports.remove(id);
+          setWeeklyReports(weeklyReports.filter((r) => r.id !== id));
+          break;
+        case "branch":
+          await dataService.branchVisits.remove(id);
+          setBranchVisits(branchVisits.filter((r) => r.id !== id));
+          break;
+        case "shortages":
+          await dataService.shortagesReports.remove(id);
+          setShortagesReports(shortagesReports.filter((r) => r.id !== id));
+          break;
+      }
+    } catch (e: unknown) {
+      alert(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -116,7 +118,33 @@ export default function HistoryPage() {
     { id: "shortages", label: "Shortages", icon: Package, count: shortagesReports.length, color: "amber" },
   ];
 
+  if (loading) return (
+    <ProtectedLayout>
+      <div className="flex items-center justify-center py-24">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-slate-500">Loading reports…</p>
+        </div>
+      </div>
+    </ProtectedLayout>
+  );
+
+  if (error) return (
+    <ProtectedLayout>
+      <div className="flex items-center justify-center py-24">
+        <div className="text-center">
+          <p className="text-red-500 font-semibold mb-2">Failed to load reports</p>
+          <p className="text-slate-500 text-sm">{error}</p>
+          <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 rounded-lg bg-sky-500 text-white text-sm hover:bg-sky-600">
+            Retry
+          </button>
+        </div>
+      </div>
+    </ProtectedLayout>
+  );
+
   return (
+    <ProtectedLayout>
     <div>
       {/* Header */}
       <div className="mb-8">
@@ -270,6 +298,7 @@ export default function HistoryPage() {
         </>
       )}
     </div>
+    </ProtectedLayout>
   );
 }
 
@@ -323,7 +352,6 @@ function ReportCard({
   };
 
   return (
-    <ProtectedLayout>
     <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex items-center justify-between hover:border-slate-300 transition-colors">
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2">
@@ -363,6 +391,5 @@ function ReportCard({
         </button>
       </div>
     </div>
-    </ProtectedLayout>
   );
 }
