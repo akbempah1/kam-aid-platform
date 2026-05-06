@@ -80,6 +80,28 @@ function WeeklyReportContent() {
   const grandTotalSales = BRANCHES.reduce((sum, branch) => sum + getTotalByBranch(branch), 0);
   const totalExpenses = expenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0);
 
+  // Best / worst day per branch (only days with data)
+  const getBestDay = (branch: string) => {
+    const filled = DAYS.filter(d => parseFloat(dailySales[d][branch]) > 0);
+    if (filled.length === 0) return null;
+    return filled.reduce((a, b) => parseFloat(dailySales[a][branch]) >= parseFloat(dailySales[b][branch]) ? a : b);
+  };
+  const getWorstDay = (branch: string) => {
+    const filled = DAYS.filter(d => parseFloat(dailySales[d][branch]) > 0);
+    if (filled.length < 2) return null;
+    return filled.reduce((a, b) => parseFloat(dailySales[a][branch]) <= parseFloat(dailySales[b][branch]) ? a : b);
+  };
+  const bestOverallDay = (() => {
+    const filled = DAYS.filter(d => getTotalByDay(d) > 0);
+    if (filled.length === 0) return null;
+    return filled.reduce((a, b) => getTotalByDay(a) >= getTotalByDay(b) ? a : b);
+  })();
+  const worstOverallDay = (() => {
+    const filled = DAYS.filter(d => getTotalByDay(d) > 0);
+    if (filled.length < 2) return null;
+    return filled.reduce((a, b) => getTotalByDay(a) <= getTotalByDay(b) ? a : b);
+  })();
+
   // Update daily sales
   const updateSales = (day: string, branch: string, value: string) => {
     setDailySales(prev => ({
@@ -146,9 +168,9 @@ function WeeklyReportContent() {
         alert("Weekly report updated!");
         router.push("/history");
       } else {
-        await weeklyReports.create(payload);
+        const created = await weeklyReports.create(payload);
         alert("Weekly report saved!");
-        clearForm();
+        router.push(`/weekly?edit=${created.id}`);
       }
     } catch (e: unknown) {
       alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
@@ -515,23 +537,39 @@ function WeeklyReportContent() {
             </thead>
             <tbody>
               {DAYS.map(day => (
-                <tr key={day} className="border-b border-slate-100">
-                  <td className="py-3 px-4 font-medium text-slate-800">{day}</td>
-                  {BRANCHES.map(branch => (
-                    <td key={branch} className="py-3 px-4">
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">GHS</span>
-                        <input
-                          type="number"
-                          placeholder="0"
-                          value={dailySales[day][branch]}
-                          onChange={(e) => updateSales(day, branch, e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-12 pr-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                        />
-                      </div>
-                    </td>
-                  ))}
-                  <td className="py-3 px-4 font-semibold text-slate-800">
+                <tr key={day} className={`border-b border-slate-100 ${day === bestOverallDay ? "bg-emerald-50/40" : day === worstOverallDay ? "bg-amber-50/40" : ""}`}>
+                  <td className="py-3 px-4 font-medium text-slate-800">
+                    <div className="flex items-center gap-2">
+                      {day}
+                      {day === bestOverallDay && <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Best</span>}
+                      {day === worstOverallDay && <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Worst</span>}
+                    </div>
+                  </td>
+                  {BRANCHES.map(branch => {
+                    const isBest  = getBestDay(branch) === day;
+                    const isWorst = getWorstDay(branch) === day;
+                    return (
+                      <td key={branch} className="py-3 px-4">
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">GHS</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={dailySales[day][branch]}
+                            onChange={(e) => updateSales(day, branch, e.target.value)}
+                            className={`w-full border rounded-lg pl-12 pr-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                              isBest  ? "bg-emerald-50 border-emerald-300" :
+                              isWorst ? "bg-amber-50 border-amber-300" :
+                              "bg-slate-50 border-slate-200"
+                            }`}
+                          />
+                          {isBest  && <span className="absolute -top-2 right-1 text-[10px] font-bold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full leading-none">↑ Best</span>}
+                          {isWorst && <span className="absolute -top-2 right-1 text-[10px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded-full leading-none">↓ Worst</span>}
+                        </div>
+                      </td>
+                    );
+                  })}
+                  <td className={`py-3 px-4 font-semibold ${day === bestOverallDay ? "text-emerald-700" : day === worstOverallDay ? "text-amber-700" : "text-slate-800"}`}>
                     GHS {getTotalByDay(day).toLocaleString()}
                   </td>
                 </tr>
@@ -550,6 +588,32 @@ function WeeklyReportContent() {
             </tbody>
           </table>
         </div>
+
+        {/* Best / worst summary strip */}
+        {grandTotalSales > 0 && (
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {BRANCHES.map(branch => {
+              const best  = getBestDay(branch);
+              const worst = getWorstDay(branch);
+              if (!best) return null;
+              return (
+                <div key={branch} className="bg-slate-50 rounded-xl p-3">
+                  <p className="text-xs font-semibold text-slate-500 mb-2">{branch}</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <span className="text-xs bg-emerald-100 text-emerald-700 font-semibold px-2 py-1 rounded-lg">
+                      ↑ {best} — GHS {parseFloat(dailySales[best][branch]).toLocaleString()}
+                    </span>
+                    {worst && (
+                      <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-1 rounded-lg">
+                        ↓ {worst} — GHS {parseFloat(dailySales[worst][branch]).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Weekly Expenses */}

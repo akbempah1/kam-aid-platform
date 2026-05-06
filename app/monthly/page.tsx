@@ -95,9 +95,9 @@ function MonthlyContent() {
         alert(`Report updated for ${MONTHS[month]} ${year}!`);
         router.push("/history");
       } else {
-        await monthlyReports.create(payload);
+        const created = await monthlyReports.create(payload);
         alert(`Report saved for ${MONTHS[month]} ${year}!`);
-        resetForm();
+        router.push(`/monthly?edit=${created.id}`);
       }
     } catch (e: unknown) {
       alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);

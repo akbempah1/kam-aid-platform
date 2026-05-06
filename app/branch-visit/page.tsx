@@ -336,7 +336,7 @@ function BranchVisitContent() {
     setSaving(true);
     try {
       if (reportId) { await branchVisits.update(reportId, payload); alert("Report updated!"); router.push("/history"); }
-      else { await branchVisits.create(payload); alert("Report saved!"); clearForm(); }
+      else { const created = await branchVisits.create(payload); alert("Report saved!"); router.push(`/branch-visit?edit=${created.id}`); }
     } catch (e: unknown) { alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`); }
     finally { setSaving(false); }
   };
