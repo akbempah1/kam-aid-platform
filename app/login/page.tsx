@@ -125,7 +125,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-slate-400 text-sm mt-8">
-          © 2025 KAM AID Pharmacy. All rights reserved.
+          © {new Date().getFullYear()} KAM AID Pharmacy. All rights reserved.
         </p>
       </div>
     </div>
