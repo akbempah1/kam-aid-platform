@@ -60,6 +60,29 @@ export const shortagesReports = {
     request<{ success: boolean }>(`/shortages/${id}`, { method: "DELETE" }),
 };
 
+// Staff
+export const staffMembers = {
+  list: () => request<Staff[]>("/staff"),
+  create: (data: Omit<Staff, "id" | "createdAt" | "updatedAt">) =>
+    request<Staff>("/staff", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<Staff>) =>
+    request<Staff>(`/staff/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  remove: (id: number) =>
+    request<{ success: boolean }>(`/staff/${id}`, { method: "DELETE" }),
+};
+
+// Bonus Records
+export const bonusRecords = {
+  list: () => request<BonusRecord[]>("/bonus"),
+  get: (id: number) => request<BonusRecord>(`/bonus/${id}`),
+  save: (data: Omit<BonusRecord, "id" | "createdAt" | "updatedAt">) =>
+    request<BonusRecord>("/bonus", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<BonusRecord>) =>
+    request<BonusRecord>(`/bonus/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  remove: (id: number) =>
+    request<{ success: boolean }>(`/bonus/${id}`, { method: "DELETE" }),
+};
+
 // Types
 export interface MonthlyReport {
   id: number;
@@ -105,6 +128,55 @@ export interface BranchVisit {
     byBranch: Record<string, { passCount: number; failCount: number; complianceRate: number }>;
   };
   createdAt: string;
+}
+
+export interface Staff {
+  id: number;
+  name: string;
+  role: "pharmacist" | "dispensing_technician" | "mca" | "head_of_operations" | "purchasing_officer";
+  branch: "Oyarifa" | "Ghana Flag" | "Madina" | "Back Office";
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BranchStaffScore {
+  staffId: number;
+  name: string;
+  role: string;
+  branch: string;
+  branchVisitAverage: number;
+  visitPoints: number;
+  individualRating: number;
+  improvementBonus: number;
+  salesBonus: number;
+  total: number;
+}
+
+export interface BackOfficeScores {
+  headOfOps: { staffId: number; name: string; visitsOnSchedule: number; reportsOnTime: number; chequeTracking: number; total: number };
+  purchasingOfficer: { staffId: number; name: string; fulfillmentRate: number; discretionaryRating: number; total: number };
+}
+
+export interface BonusScores {
+  branchStaff: BranchStaffScore[];
+  backOffice: BackOfficeScores;
+  metadata: {
+    branchAverages: Record<string, number>;
+    previousBranchAverages: Record<string, number>;
+    salesTotals: Record<string, number>;
+    previousSalesTotals: Record<string, number>;
+  };
+}
+
+export interface BonusRecord {
+  id: number;
+  periodType: "Q1" | "Q2" | "Q3" | "Q4" | "Annual";
+  year: number;
+  scores: BonusScores;
+  status: "draft" | "final";
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ShortagesReport {
