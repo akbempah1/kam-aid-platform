@@ -3,9 +3,10 @@ import { Suspense } from "react";
 import ProtectedLayout from "../components/ProtectedLayout";
 import FileUpload from "../components/FileUpload";
 import DashboardModal from "../components/DashboardModal";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { monthlyReports } from "@/lib/dataService";
+import { RefreshCw } from "lucide-react";
+import { monthlyReports, weeklyReports, type WeeklyReport } from "@/lib/dataService";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -43,6 +44,8 @@ function MonthlyContent() {
   const [customExpenses, setCustomExpenses] = useState<{id: number, name: string, amount: string}[]>([]);
   const [newExpenseName, setNewExpenseName] = useState("");
   const [showDashboard, setShowDashboard] = useState(false);
+  const [allWeekly, setAllWeekly] = useState<WeeklyReport[]>([]);
+  const [weeklySource, setWeeklySource] = useState<{ count: number; weeks: string[] } | null>(null);
 
   // Load report if editing
   useEffect(() => {
@@ -60,6 +63,65 @@ function MonthlyContent() {
       }).catch(() => {});
     }
   }, [editId]);
+
+  // Load all weekly reports once on mount
+  useEffect(() => {
+    weeklyReports.list().then(setAllWeekly).catch(() => {});
+  }, []);
+
+  // Pull sales + expenses from weekly reports for the selected month
+  const applyWeeklyData = useCallback((m: number, y: number, weekly: WeeklyReport[]) => {
+    const relevant = weekly.filter(w => {
+      const start = new Date(w.weekStart);
+      return start.getMonth() === m && start.getFullYear() === y;
+    });
+    if (relevant.length === 0) {
+      setWeeklySource(null);
+      return;
+    }
+
+    // Sum per-branch sales across all relevant weeks
+    let oya = 0, gf = 0, mad = 0;
+    relevant.forEach(w => {
+      oya += w.totals.byBranch["Oyarifa"]    || 0;
+      gf  += w.totals.byBranch["Ghana Flag"] || 0;
+      mad += w.totals.byBranch["Madina"]     || 0;
+    });
+    setSales({
+      oyarifa:   oya > 0 ? String(parseFloat(oya.toFixed(2)))  : "",
+      ghanaFlag: gf  > 0 ? String(parseFloat(gf.toFixed(2)))   : "",
+      madina:    mad > 0 ? String(parseFloat(mad.toFixed(2)))   : "",
+    });
+
+    // Group and sum all weekly expense line items by name
+    const expMap: Record<string, number> = {};
+    relevant.forEach(w => {
+      w.expenses.forEach(e => {
+        const key = e.name.trim();
+        if (key) expMap[key] = (expMap[key] || 0) + (parseFloat(e.amount) || 0);
+      });
+    });
+    const loaded = Object.entries(expMap)
+      .filter(([, amt]) => amt > 0)
+      .map(([name, amt], i) => ({ id: Date.now() + i, name, amount: String(parseFloat(amt.toFixed(2))) }));
+    setCustomExpenses(loaded);
+
+    setWeeklySource({
+      count: relevant.length,
+      weeks: relevant.map(w => {
+        const s = new Date(w.weekStart);
+        const e = new Date(w.weekEnd);
+        return `${s.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ${e.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`;
+      }),
+    });
+  }, []);
+
+  // Auto-apply when creating a new report and month/year changes
+  useEffect(() => {
+    if (!editId && allWeekly.length > 0) {
+      applyWeeklyData(month, year, allWeekly);
+    }
+  }, [month, year, allWeekly, editId, applyWeeklyData]);
 
   // Calculations
   const totalSales = Object.values(sales).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
@@ -249,7 +311,25 @@ const handleFileData = (data: {
 
       {/* Branch Sales */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Sales Revenue by Branch</h2>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800">Sales Revenue by Branch</h2>
+            {weeklySource ? (
+              <p className="text-xs text-emerald-600 mt-0.5">
+                Loaded from {weeklySource.count} weekly report{weeklySource.count !== 1 ? "s" : ""}
+                <span className="text-slate-400 ml-1">({weeklySource.weeks.join(", ")})</span>
+              </p>
+            ) : allWeekly.length > 0 ? (
+              <p className="text-xs text-slate-400 mt-0.5">No weekly reports found for {MONTHS[month]} {year}</p>
+            ) : null}
+          </div>
+          <button
+            onClick={() => applyWeeklyData(month, year, allWeekly)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-sky-600 border border-sky-200 rounded-lg hover:bg-sky-50 transition-colors shrink-0"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Load from weekly
+          </button>
+        </div>
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-2">Oyarifa Branch</label>
@@ -316,12 +396,12 @@ const handleFileData = (data: {
         <h2 className="text-lg font-semibold text-slate-800 mb-4">Operating Expenses</h2>
         <div className="space-y-4">
           {[
-            { key: "salaries", label: "Salaries & Wages" },
-            { key: "rent", label: "Rent" },
-            { key: "electricity", label: "Electricity" },
-            { key: "phone", label: "Phone & Internet" },
-            { key: "pettyCash", label: "Petty Cash" },
-            { key: "maintenance", label: "Maintenance & Repairs" },
+            { key: "salaries",      label: "Salaries & Wages" },
+            { key: "rent",          label: "Rent" },
+            { key: "electricity",   label: "Electricity" },
+            { key: "phone",         label: "Phone & Internet" },
+            { key: "pettyCash",     label: "Petty Cash" },
+            { key: "maintenance",   label: "Maintenance & Repairs" },
             { key: "miscellaneous", label: "Miscellaneous" },
           ].map((item) => (
             <div key={item.key} className="flex items-center gap-4">
@@ -339,7 +419,24 @@ const handleFileData = (data: {
             </div>
           ))}
 
-          {/* Custom Expenses */}
+          {/* Weekly-sourced + manual custom expenses */}
+          {customExpenses.length > 0 && (
+            <div className="pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-slate-500">
+                  {weeklySource ? `Weekly operating expenses (${weeklySource.count} weeks)` : "Additional expenses"}
+                </p>
+                {weeklySource && (
+                  <button
+                    onClick={() => applyWeeklyData(month, year, allWeekly)}
+                    className="flex items-center gap-1 text-xs text-sky-500 hover:text-sky-700 transition-colors"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Reload
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {customExpenses.map((expense) => (
             <div key={expense.id} className="flex items-center gap-4">
               <label className="w-48 text-sm font-medium text-slate-600">{expense.name}</label>
@@ -366,7 +463,7 @@ const handleFileData = (data: {
           <div className="flex items-center gap-4 pt-4 border-t border-slate-100 mt-4">
             <input
               type="text"
-              placeholder="New expense category name..."
+              placeholder="Add extra expense (e.g. Salaries, Insurance)..."
               value={newExpenseName}
               onChange={(e) => setNewExpenseName(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && addCustomExpense()}
