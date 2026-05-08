@@ -143,20 +143,32 @@ function buildDefaultScores(
     previousSalesTotals[branch] = calcBranchSales(prevReports, branch);
   }
 
-  const branchStaff: BranchStaffScore[] = staff
-    .filter(s => s.active && s.branch !== "Back Office")
-    .map(s => {
-      const saved = savedScores?.branchStaff.find(x => x.staffId === s.id);
-      const avg = branchAverages[s.branch] ?? 0;
-      const prevAvg = previousBranchAverages[s.branch] ?? 0;
-      const visitPoints = calcVisitPoints(avg, s.role);
-      const improvementBonus = s.role === "pharmacist" && avg > prevAvg ? 10 : 0;
-      const salesBonus = calcSalesBonus(salesTotals[s.branch] ?? 0, previousSalesTotals[s.branch] ?? 0);
-      const subCriteria = saved?.subCriteria ?? { c1: 0, c2: 0, c3: 0 };
-      const individualRating = saved?.individualRating ?? (subCriteria.c1 + subCriteria.c2 + subCriteria.c3);
-      const total = parseFloat((visitPoints + individualRating + improvementBonus + salesBonus).toFixed(1));
-      return { staffId: s.id, name: s.name, role: s.role, branch: s.branch, branchVisitAverage: avg, visitPoints, individualRating, subCriteria, improvementBonus, salesBonus, total };
-    });
+  const branchStaff: BranchStaffScore[] = [
+    // Regular branch staff
+    ...staff
+      .filter(s => s.active && s.branch !== "Back Office")
+      .map(s => {
+        const saved = savedScores?.branchStaff.find(x => x.staffId === s.id);
+        const avg = branchAverages[s.branch] ?? 0;
+        const prevAvg = previousBranchAverages[s.branch] ?? 0;
+        const visitPoints = calcVisitPoints(avg, s.role);
+        const improvementBonus = s.role === "pharmacist" && avg > prevAvg ? 10 : 0;
+        const salesBonus = calcSalesBonus(salesTotals[s.branch] ?? 0, previousSalesTotals[s.branch] ?? 0);
+        const subCriteria = saved?.subCriteria ?? { c1: 0, c2: 0, c3: 0 };
+        const individualRating = saved?.individualRating ?? (subCriteria.c1 + subCriteria.c2 + subCriteria.c3);
+        const total = parseFloat((visitPoints + individualRating + improvementBonus + salesBonus).toFixed(1));
+        return { staffId: s.id, name: s.name, role: s.role, branch: s.branch, branchVisitAverage: avg, visitPoints, individualRating, subCriteria, improvementBonus, salesBonus, total };
+      }),
+    // Back Office staff who aren't HOO or Purchasing Officer
+    ...staff
+      .filter(s => s.active && s.branch === "Back Office" && s.role !== "head_of_operations" && s.role !== "purchasing_officer")
+      .map(s => {
+        const saved = savedScores?.branchStaff.find(x => x.staffId === s.id);
+        const subCriteria = saved?.subCriteria ?? { c1: 0, c2: 0, c3: 0 };
+        const individualRating = saved?.individualRating ?? (subCriteria.c1 + subCriteria.c2 + subCriteria.c3);
+        return { staffId: s.id, name: s.name, role: s.role, branch: "Back Office" as Staff["branch"], branchVisitAverage: 0, visitPoints: 0, individualRating, subCriteria, improvementBonus: 0, salesBonus: 0, total: parseFloat(individualRating.toFixed(1)) };
+      }),
+  ];
 
   const headOfOpsStaff = staff.find(s => s.role === "head_of_operations" && s.active);
   const poStaff = staff.find(s => s.role === "purchasing_officer" && s.active);
@@ -751,7 +763,7 @@ function BonusContent() {
           })()}
 
           {/* Back Office */}
-          {scores && (scores.backOffice.headOfOps.name || scores.backOffice.purchasingOfficer.name) && (
+          {scores && (scores.backOffice.headOfOps.name || scores.backOffice.purchasingOfficer.name || allBranchStaff.some(s => s.branch === "Back Office")) && (
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
               <div className="p-5 border-b border-slate-100 flex items-center gap-3">
                 <div className="w-9 h-9 bg-sky-100 rounded-xl flex items-center justify-center">
@@ -806,6 +818,35 @@ function BonusContent() {
                     <ScoreBar value={scores.backOffice.purchasingOfficer.total} max={100} color={scores.backOffice.purchasingOfficer.total >= 80 ? "bg-emerald-400" : scores.backOffice.purchasingOfficer.total >= 60 ? "bg-amber-400" : "bg-red-400"} />
                   </div>
                 )}
+
+                {/* Other Back Office staff (any role that isn't HOO or PO) */}
+                {allBranchStaff.filter(s => s.branch === "Back Office").map(s => (
+                  <div key={s.staffId} className="border border-slate-200 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-slate-800">{s.name}</p>
+                        <p className="text-xs text-slate-500">{ROLE_LABELS[s.role] || s.role}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-sky-600">{s.total.toFixed(0)}</p>
+                        <p className="text-xs text-slate-400">/ 30 pts</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 pt-1">
+                      <p className="text-xs font-semibold text-slate-600">Individual Rating (3 × 10 pts)</p>
+                      {(["c1", "c2", "c3"] as const).map((key, i) => (
+                        <PointInput
+                          key={key}
+                          label={`${getRatingCriteria(s.role)[i]} (0–10)`}
+                          value={s.subCriteria?.[key] ?? 0}
+                          max={10}
+                          onChange={v => updateSubCriterion(s.staffId, key, v)}
+                        />
+                      ))}
+                    </div>
+                    <ScoreBar value={s.total} max={30} color={s.total >= 24 ? "bg-emerald-400" : s.total >= 18 ? "bg-amber-400" : "bg-red-400"} />
+                  </div>
+                ))}
               </div>
             </div>
           )}
