@@ -141,6 +141,7 @@ export interface Staff {
 }
 
 export interface BranchStaffScore {
+  subCriteria?: { c1: number; c2: number; c3: number };
   staffId: number;
   name: string;
   role: string;

@@ -547,8 +547,8 @@ function ReportCard({
           <p className="text-sm text-slate-500">{subtitle}</p>
         </div>
       </div>
-      <div className="flex items-center gap-6">
-        <div className="text-right">
+      <div className="flex items-center gap-4 shrink-0">
+        <div className="text-right mr-2">
           <p className="text-sm text-slate-500">{metricLabel}</p>
           <p className="font-bold" style={{ color: metricStyles[metricColor] }}>{metric}</p>
         </div>
@@ -556,23 +556,24 @@ function ReportCard({
           <button
             onClick={onDownload}
             disabled={downloading}
-            className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-40"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-50 transition-colors disabled:opacity-40 shrink-0"
             title="Download PDF"
           >
             {downloading
-              ? <div className="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-              : <Download className="w-5 h-5" />}
+              ? <div className="w-4 h-4 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+              : <Download className="w-4 h-4" />}
+            <span className="hidden sm:inline">Download</span>
           </button>
         )}
         <button
           onClick={onEdit}
-          className="p-2 text-slate-400 hover:text-sky-500 hover:bg-sky-50 rounded-lg transition-colors"
+          className="p-2 text-slate-400 hover:text-sky-500 hover:bg-sky-50 rounded-lg transition-colors shrink-0"
         >
           <Pencil className="w-5 h-5" />
         </button>
         <button
           onClick={onDelete}
-          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"
         >
           <Trash2 className="w-5 h-5" />
         </button>

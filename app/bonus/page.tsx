@@ -27,6 +27,29 @@ const ROLE_LABELS: Record<string, string> = {
   purchasing_officer: "Purchasing Officer",
 };
 
+// Role-specific criteria for the 3 × 10-point individual rating
+const RATING_CRITERIA: Record<string, [string, string, string]> = {
+  pharmacist: [
+    "Professional & clinical conduct",
+    "Staff management & oversight",
+    "Attendance & admin duties",
+  ],
+  dispensing_technician: [
+    "Technical accuracy & dispensing quality",
+    "Compliance & professional conduct",
+    "Attendance & punctuality",
+  ],
+  mca: [
+    "Shelf upkeep & display quality",
+    "Customer service & conduct",
+    "Attendance & punctuality",
+  ],
+};
+
+function getRatingCriteria(role: string): [string, string, string] {
+  return RATING_CRITERIA[role] ?? ["Quality of work", "Conduct & attitude", "Attendance & punctuality"];
+}
+
 const BRANCH_SALES_KEY: Record<string, string> = {
   Oyarifa: "oyarifa",
   "Ghana Flag": "ghanaFlag",
@@ -129,9 +152,10 @@ function buildDefaultScores(
       const visitPoints = calcVisitPoints(avg, s.role);
       const improvementBonus = s.role === "pharmacist" && avg > prevAvg ? 10 : 0;
       const salesBonus = calcSalesBonus(salesTotals[s.branch] ?? 0, previousSalesTotals[s.branch] ?? 0);
-      const individualRating = saved?.individualRating ?? 0;
+      const subCriteria = saved?.subCriteria ?? { c1: 0, c2: 0, c3: 0 };
+      const individualRating = saved?.individualRating ?? (subCriteria.c1 + subCriteria.c2 + subCriteria.c3);
       const total = parseFloat((visitPoints + individualRating + improvementBonus + salesBonus).toFixed(1));
-      return { staffId: s.id, name: s.name, role: s.role, branch: s.branch, branchVisitAverage: avg, visitPoints, individualRating, improvementBonus, salesBonus, total };
+      return { staffId: s.id, name: s.name, role: s.role, branch: s.branch, branchVisitAverage: avg, visitPoints, individualRating, subCriteria, improvementBonus, salesBonus, total };
     });
 
   const headOfOpsStaff = staff.find(s => s.role === "head_of_operations" && s.active);
@@ -409,13 +433,15 @@ function BonusContent() {
     if (!loading) recalculate(staff, allVisits, allReports, history, periodType, year);
   }, [loading, staff, allVisits, allReports, history, periodType, year, recalculate]);
 
-  function updateIndividualRating(staffId: number, value: number) {
+  function updateSubCriterion(staffId: number, criterion: "c1" | "c2" | "c3", value: number) {
     setScores(prev => {
       if (!prev) return prev;
       const updated = prev.branchStaff.map(s => {
         if (s.staffId !== staffId) return s;
-        const total = parseFloat((s.visitPoints + value + s.improvementBonus + s.salesBonus).toFixed(1));
-        return { ...s, individualRating: value, total };
+        const sub = { ...(s.subCriteria ?? { c1: 0, c2: 0, c3: 0 }), [criterion]: value };
+        const individualRating = sub.c1 + sub.c2 + sub.c3;
+        const total = parseFloat((s.visitPoints + individualRating + s.improvementBonus + s.salesBonus).toFixed(1));
+        return { ...s, subCriteria: sub, individualRating, total };
       });
       return { ...prev, branchStaff: updated };
     });
@@ -663,14 +689,14 @@ function BonusContent() {
                           </div>
 
                           {/* Score breakdown */}
-                          <div className="space-y-2 bg-slate-50 rounded-lg p-3 text-xs">
+                          <div className="space-y-1.5 bg-slate-50 rounded-lg p-3 text-xs">
                             <div className="flex justify-between">
                               <span className="text-slate-500">Branch Visit ({s.role === "pharmacist" ? "60" : "70"} pts max)</span>
                               <span className="font-semibold text-slate-700">{s.visitPoints.toFixed(1)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-slate-500">Individual Rating (30 pts max)</span>
-                              <span className="font-semibold text-slate-700">{s.individualRating}</span>
+                              <span className="font-semibold text-slate-700">{s.individualRating} / 30</span>
                             </div>
                             {s.role === "pharmacist" && (
                               <div className="flex justify-between">
@@ -684,13 +710,19 @@ function BonusContent() {
                             </div>
                           </div>
 
-                          {/* Individual rating input */}
-                          <PointInput
-                            label="Set Individual Rating (0–30)"
-                            value={s.individualRating}
-                            max={30}
-                            onChange={v => updateIndividualRating(s.staffId, v)}
-                          />
+                          {/* Individual rating — 3 × 10 pts, role-specific criteria */}
+                          <div className="space-y-2 pt-1">
+                            <p className="text-xs font-semibold text-slate-600">Individual Rating (3 × 10 pts)</p>
+                            {(["c1", "c2", "c3"] as const).map((key, i) => (
+                              <PointInput
+                                key={key}
+                                label={`${getRatingCriteria(s.role)[i]} (0–10)`}
+                                value={s.subCriteria?.[key] ?? 0}
+                                max={10}
+                                onChange={v => updateSubCriterion(s.staffId, key, v)}
+                              />
+                            ))}
+                          </div>
                           <ScoreBar value={s.total} max={110} color={s.total >= 80 ? "bg-emerald-400" : s.total >= 60 ? "bg-amber-400" : "bg-red-400"} />
                         </div>
                       ))}
@@ -700,6 +732,23 @@ function BonusContent() {
               </div>
             );
           })}
+
+          {/* Unmatched branch staff — catches typos or unrecognised branch names */}
+          {(() => {
+            const unmatched = allBranchStaff.filter(s => !BRANCHES.includes(s.branch as typeof BRANCHES[number]));
+            if (unmatched.length === 0) return null;
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
+                <p className="font-semibold text-amber-800 mb-1">Staff with unrecognised branch ({unmatched.length})</p>
+                <p className="text-xs text-amber-600 mb-3">These staff members have a branch name that doesn&apos;t match Oyarifa, Ghana Flag, or Madina exactly. Open Manage Staff and correct their branch.</p>
+                <div className="space-y-1">
+                  {unmatched.map(s => (
+                    <p key={s.staffId} className="text-sm text-amber-900">• {s.name} — <span className="font-mono bg-amber-100 px-1 rounded">{s.branch}</span></p>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Back Office */}
           {scores && (scores.backOffice.headOfOps.name || scores.backOffice.purchasingOfficer.name) && (

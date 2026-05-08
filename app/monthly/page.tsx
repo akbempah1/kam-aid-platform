@@ -92,9 +92,10 @@ function MonthlyContent() {
 
   // Pull sales + expenses from weekly reports for the selected month
   const applyWeeklyData = useCallback((m: number, y: number, weekly: WeeklyReport[]) => {
+    // Use weekEnd month so a week ending May 4 counts for May even if it started April 28
     const relevant = weekly.filter(w => {
-      const start = new Date(w.weekStart);
-      return start.getMonth() === m && start.getFullYear() === y;
+      const end = new Date(w.weekEnd);
+      return end.getMonth() === m && end.getFullYear() === y;
     });
     if (relevant.length === 0) {
       setWeeklySource(null);
