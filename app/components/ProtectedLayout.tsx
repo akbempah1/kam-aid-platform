@@ -2,23 +2,35 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import { Loader2 } from "lucide-react";
 
-export default function ProtectedLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
     }
   }, [status, router]);
+
+  // Load saved preference after mount
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("sidebar-collapsed") === "true") setCollapsed(true);
+    } catch {}
+  }, []);
+
+  const toggleSidebar = () => {
+    setCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem("sidebar-collapsed", String(next)); } catch {}
+      return next;
+    });
+  };
 
   if (status === "loading") {
     return (
@@ -31,14 +43,12 @@ export default function ProtectedLayout({
     );
   }
 
-  if (!session) {
-    return null;
-  }
+  if (!session) return null;
 
   return (
     <div className="flex bg-slate-50 min-h-screen">
-      <Sidebar />
-      <main className="flex-1 p-8 overflow-auto">
+      <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
+      <main className="flex-1 p-8 overflow-auto min-w-0">
         {children}
       </main>
     </div>
