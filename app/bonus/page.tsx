@@ -321,9 +321,17 @@ function StaffModal({ staff, onClose, onSave }: { staff: Staff[]; onClose: () =>
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
+function currentQuarter(): PeriodType {
+  const m = new Date().getMonth() + 1;
+  if (m <= 3) return "Q1";
+  if (m <= 6) return "Q2";
+  if (m <= 9) return "Q3";
+  return "Q4";
+}
+
 function BonusContent() {
   const currentYear = new Date().getFullYear();
-  const [periodType, setPeriodType] = useState<PeriodType>("Q1");
+  const [periodType, setPeriodType] = useState<PeriodType>(currentQuarter());
   const [year, setYear] = useState(currentYear);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [allVisits, setAllVisits] = useState<BranchVisit[]>([]);
@@ -568,10 +576,19 @@ function BonusContent() {
           </div>
 
           {staff.filter(s => s.active && s.branch !== "Back Office").length === 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center">
-              <Users className="w-10 h-10 text-amber-400 mx-auto mb-2" />
-              <p className="font-semibold text-amber-800">No branch staff added yet</p>
-              <p className="text-sm text-amber-600 mt-1">Click &quot;Manage Staff&quot; to add your team members first.</p>
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center">
+              <Users className="w-12 h-12 text-amber-400 mx-auto mb-3" />
+              <p className="font-bold text-amber-800 text-lg mb-1">Staff roster is empty</p>
+              <p className="text-sm text-amber-700 mb-4 max-w-md mx-auto">
+                Before scores can be calculated, you need to register your staff here once. Branch visit compliance scores will then feed in automatically.
+              </p>
+              <button
+                onClick={() => setShowStaffModal(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 text-white rounded-xl font-medium hover:bg-amber-600 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add Staff Members
+              </button>
+              <p className="text-xs text-amber-600 mt-3">Add each person with their name, role (Pharmacist / MCA / etc.) and branch</p>
             </div>
           )}
 

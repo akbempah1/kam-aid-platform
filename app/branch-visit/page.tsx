@@ -21,7 +21,7 @@ type BinaryItem  = { value: boolean | null; notes: string };
 type ExpiredDrug   = { id: number; drugName: string; expiryDate: string; quantity: string; shelfLocation: string };
 type NearExpiryDrug = { id: number; drugName: string; expiryDate: string; quantity: string; stickerApplied: boolean | null };
 type OutOfStockItem = { id: number; productName: string; duration: string };
-type ShelfEntry     = { id: number; workerName: string; shelfArea: string; rating: number; observation: string };
+type ShelfEntry     = { id: number; workerName: string; shelfArea: string; shelfCleanliness: number; drugCleanliness: number; noEmptySpots: number; observation: string; rating?: number };
 type StaffEntry     = { id: number; name: string; present: boolean | null; inLabCoat: boolean | null };
 type ActionItem     = { id: number; action: string; dueDate: string; responsible: string; branch: string };
 type AutoIssue      = { id: number; description: string; priority: "high" | "medium"; branch: string; assignedTo: string };
@@ -55,6 +55,80 @@ type InspectionData = Record<string, BranchInspection>;
 const RATING_LABELS: Record<number, string> = {
   0: "", 1: "Very Poor", 2: "Poor", 3: "Acceptable", 4: "Good", 5: "Excellent",
 };
+
+// ─── Branch templates ─────────────────────────────────────────────────────────
+
+type BranchTemplate  = { staff: { name: string }[]; shelves: { workerName: string; shelfArea: string }[] };
+type BranchTemplates = Record<string, BranchTemplate>;
+
+const TEMPLATES_KEY = "kam-aid-branch-templates";
+
+const DEFAULT_TEMPLATES: BranchTemplates = {
+  "Oyarifa": {
+    staff: [{ name: "Pharm Sandy" }, { name: "Jennifer" }],
+    shelves: [
+      { workerName: "Jennifer",  shelfArea: "Prescription" },
+      { workerName: "Grace",     shelfArea: "Antibiotics, cold tablets" },
+      { workerName: "Berlinda",  shelfArea: "Cough and cold" },
+      { workerName: "Jennifer",  shelfArea: "Medical disposals (gloves, bandages), ivs" },
+      { workerName: "Jennifer",  shelfArea: "Snacks" },
+      { workerName: "Berlinda",  shelfArea: "Multivitamins" },
+      { workerName: "Grace",     shelfArea: "Herbals" },
+      { workerName: "Grace",     shelfArea: "Baby food" },
+      { workerName: "Grace",     shelfArea: "Antiseptics, diapers" },
+      { workerName: "Berlinda",  shelfArea: "Cosmetics" },
+    ],
+  },
+  "Ghana Flag": {
+    staff: [{ name: "Twumwaa" }, { name: "Pharm David" }, { name: "MCA" }],
+    shelves: [
+      { workerName: "Matilda",  shelfArea: "Vitamins, hematinics" },
+      { workerName: "Matilda",  shelfArea: "Herbals, Antacids, ointments" },
+      { workerName: "Matilda",  shelfArea: "Diapers, toothpastes, mouthwashes" },
+      { workerName: "Matilda",  shelfArea: "Cosmetics, sanitary pads, antiseptics" },
+      { workerName: "Matilda",  shelfArea: "Snacks and baby food" },
+      { workerName: "Matilda",  shelfArea: "Toys" },
+      { workerName: "Twumwaa", shelfArea: "Prescription shelf" },
+      { workerName: "Twumwaa", shelfArea: "Cough and cold, creams" },
+      { workerName: "Twumwaa", shelfArea: "Medical disposals (gloves, cotton)" },
+    ],
+  },
+  "Madina": {
+    staff: [{ name: "Mr. Eric" }, { name: "Dr. Kingsley" }, { name: "Prince" }],
+    shelves: [
+      { workerName: "Prince", shelfArea: "Herbals and ointment" },
+      { workerName: "Prince", shelfArea: "Hematinics" },
+      { workerName: "Prince", shelfArea: "Multivitamins and creams" },
+      { workerName: "Prince", shelfArea: "Prescriptions" },
+      { workerName: "",       shelfArea: "Eye drops and other tablets shelf" },
+      { workerName: "",       shelfArea: "Cough and cold shelf" },
+      { workerName: "",       shelfArea: "Cosmetics" },
+      { workerName: "",       shelfArea: "Baby food" },
+      { workerName: "",       shelfArea: "Snacks" },
+      { workerName: "",       shelfArea: "Toothpastes, mouthwashes" },
+    ],
+  },
+};
+
+function getTemplates(): BranchTemplates {
+  if (typeof window === "undefined") return DEFAULT_TEMPLATES;
+  try {
+    const stored = localStorage.getItem(TEMPLATES_KEY);
+    return stored ? { ...DEFAULT_TEMPLATES, ...JSON.parse(stored) } : DEFAULT_TEMPLATES;
+  } catch { return DEFAULT_TEMPLATES; }
+}
+
+function saveTemplates(templates: BranchTemplates) {
+  try { localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates)); } catch {}
+}
+
+function templateToEntries(t: BranchTemplate): { staffEntries: StaffEntry[]; individualShelves: ShelfEntry[] } {
+  const base = Date.now();
+  return {
+    staffEntries: t.staff.map((s, i) => ({ id: base + i, name: s.name, present: null, inLabCoat: null })),
+    individualShelves: t.shelves.map((s, i) => ({ id: base + i + 10000, workerName: s.workerName, shelfArea: s.shelfArea, shelfCleanliness: 0, drugCleanliness: 0, noEmptySpots: 0, observation: "" })),
+  };
+}
 
 const emptyQuality  = (): QualityItem => ({ rating: 0, observation: "" });
 const emptyBinary   = (): BinaryItem  => ({ value: null, notes: "" });
@@ -181,6 +255,9 @@ function BranchVisitContent() {
   const [generalNotes, setGeneralNotes] = useState("");
   const [showPreview, setShowPreview]   = useState(false);
   const [saving, setSaving]             = useState(false);
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [templateEditorBranch, setTemplateEditorBranch] = useState("Oyarifa");
+  const [draftTemplate, setDraftTemplate] = useState<BranchTemplate | null>(null);
 
   const activeBranches = reportType === "single" ? [selectedBranch] : BRANCHES;
   const currentBranch  = reportType === "single" ? selectedBranch : activeBranchTab;
@@ -202,7 +279,11 @@ function BranchVisitContent() {
       d.interiorSpaces.floors.rating, d.interiorSpaces.washroom.rating, d.interiorSpaces.storeroom.rating,
       d.shelvesProducts.overallAppearance.rating, d.shelvesProducts.counterCleanliness.rating,
       d.personnel.staffAttitude.rating,
-      ...d.shelvesProducts.individualShelves.map(s => s.rating),
+      ...d.shelvesProducts.individualShelves.map(s => {
+        const sc = s.shelfCleanliness || 0, dc = s.drugCleanliness || 0, nes = s.noEmptySpots || 0;
+        const active = [sc, dc, nes].filter(v => v > 0);
+        return active.length > 0 ? active.reduce((a, b) => a + b, 0) / active.length : (s.rating || 0);
+      }),
     ].filter(r => r > 0);
     const binaryValues = [
       d.exterior.signageWorking.value, d.systems.posOperational.value, d.systems.noPendingTransfers.value,
@@ -248,8 +329,16 @@ function BranchVisitContent() {
       });
       // Individual shelves ≤ 2
       d.shelvesProducts.individualShelves.forEach(s => {
-        if (s.rating > 0 && s.rating <= 2)
-          issues.push({ id: id++, description: `Shelf cleanliness: ${s.workerName} (${s.shelfArea}) rated ${s.rating}/5${s.observation ? ` — ${s.observation}` : ""}`, priority: s.rating === 1 ? "high" : "medium", branch, assignedTo: s.workerName });
+        const sc = s.shelfCleanliness || 0, dc = s.drugCleanliness || 0, nes = s.noEmptySpots || 0;
+        const hasNew = sc > 0 || dc > 0 || nes > 0;
+        const lbl = `${s.workerName ? s.workerName + " — " : ""}${s.shelfArea}`;
+        if (hasNew) {
+          ([{ v: sc, t: "Shelf cleanliness" }, { v: dc, t: "Drug cleanliness" }, { v: nes, t: "Empty spots on shelf" }] as const).forEach(({ v, t }) => {
+            if (v > 0 && v <= 2) issues.push({ id: id++, description: `${t}: ${lbl} rated ${v}/5`, priority: v === 1 ? "high" : "medium", branch, assignedTo: s.workerName });
+          });
+        } else if ((s.rating || 0) > 0 && (s.rating || 0) <= 2) {
+          issues.push({ id: id++, description: `Shelf cleanliness: ${s.workerName} (${s.shelfArea}) rated ${s.rating}/5${s.observation ? ` — ${s.observation}` : ""}`, priority: (s.rating || 0) === 1 ? "high" : "medium", branch, assignedTo: s.workerName });
+        }
       });
       // Expired drugs
       d.shelvesProducts.expiredDrugs.forEach(drug =>
@@ -306,6 +395,28 @@ function BranchVisitContent() {
       setGeneralNotes(report.generalNotes || "");
     }).catch(() => {});
   }, [editId]);
+
+  // ── Auto-load branch templates for new reports ──────────────────────────────
+
+  useEffect(() => {
+    if (editId) return;
+    const templates = getTemplates();
+    setInspectionData(prev => {
+      const next = { ...prev };
+      BRANCHES.forEach(branch => {
+        const t = templates[branch];
+        if (!t) return;
+        const { staffEntries, individualShelves } = templateToEntries(t);
+        next[branch] = {
+          ...next[branch],
+          personnel: { ...next[branch].personnel, staffEntries },
+          shelvesProducts: { ...next[branch].shelvesProducts, individualShelves },
+        };
+      });
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -379,7 +490,16 @@ function BranchVisitContent() {
           ${q("Overall shelf appearance", d.shelvesProducts.overallAppearance)}
           ${d.shelvesProducts.individualShelves.length > 0 ? `
             <div style="margin:6px 0 2px 0;font-size:11px;font-weight:600;color:#64748b">Individual Shelves</div>
-            ${d.shelvesProducts.individualShelves.map(s => `<div class="check-row"><span class="label">${s.workerName} — ${s.shelfArea}</span><span class="rating-badge" style="background:${ratingColor(s.rating)}20;color:${ratingColor(s.rating)}">${s.rating}/5</span>${s.observation ? `<span class="obs">${s.observation}</span>` : ""}</div>`).join("")}
+            ${d.shelvesProducts.individualShelves.map(s => {
+              const sc = s.shelfCleanliness || 0, dc = s.drugCleanliness || 0, nes = s.noEmptySpots || 0;
+              const hasNew = sc > 0 || dc > 0 || nes > 0;
+              if (hasNew) {
+                const active = [sc, dc, nes].filter(v => v > 0);
+                const avg = active.reduce((a, b) => a + b, 0) / active.length;
+                return `<div class="check-row"><span class="label">${s.workerName ? s.workerName + " — " : ""}${s.shelfArea}</span><span class="rating-badge" style="background:${ratingColor(Math.round(avg))}20;color:${ratingColor(Math.round(avg))}">${avg.toFixed(1)}/5</span><span class="obs">Shelf: ${sc || "—"}/5 · Drugs: ${dc || "—"}/5 · Stocked: ${nes || "—"}/5</span></div>`;
+              }
+              return `<div class="check-row"><span class="label">${s.workerName ? s.workerName + " — " : ""}${s.shelfArea}</span><span class="rating-badge" style="background:${ratingColor(s.rating || 0)}20;color:${ratingColor(s.rating || 0)}">${s.rating || 0}/5</span>${s.observation ? `<span class="obs">${s.observation}</span>` : ""}</div>`;
+            }).join("")}
           ` : ""}
           ${b("Expired drugs found", d.shelvesProducts.expiredDrugsFound)}
           ${d.shelvesProducts.expiredDrugs.length > 0 ? `
@@ -624,13 +744,24 @@ function BranchVisitContent() {
 
               {/* Individual shelves */}
               <div className="p-4 bg-slate-50 rounded-xl">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <p className="font-medium text-slate-800 text-sm">Individual shelf cleanliness (per worker)</p>
-                  <button type="button"
-                    onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: [...p.shelvesProducts.individualShelves, { id: Date.now(), workerName: "", shelfArea: "", rating: 0, observation: "" }] } }))}
-                    className="flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-700 font-medium">
-                    <Plus className="w-4 h-4" /> Add shelf
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button type="button"
+                      onClick={() => {
+                        setTemplateEditorBranch(currentBranch);
+                        setDraftTemplate(JSON.parse(JSON.stringify(getTemplates()[currentBranch] || { staff: [], shelves: [] })));
+                        setShowTemplateEditor(true);
+                      }}
+                      className="text-xs text-slate-500 hover:text-slate-700 font-medium border border-slate-200 rounded-lg px-2.5 py-1 bg-white hover:bg-slate-50 transition-colors">
+                      Edit defaults
+                    </button>
+                    <button type="button"
+                      onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: [...p.shelvesProducts.individualShelves, { id: Date.now(), workerName: "", shelfArea: "", shelfCleanliness: 0, drugCleanliness: 0, noEmptySpots: 0, observation: "" }] } }))}
+                      className="flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-700 font-medium">
+                      <Plus className="w-4 h-4" /> Add shelf
+                    </button>
+                  </div>
                 </div>
                 {d.shelvesProducts.individualShelves.length === 0 && <p className="text-sm text-slate-400 italic">No shelves added yet</p>}
                 <div className="space-y-3">
@@ -640,18 +771,30 @@ function BranchVisitContent() {
                         <input type="text" placeholder="Worker name" value={shelf.workerName}
                           onChange={e => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], workerName: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })}
                           className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-                        <input type="text" placeholder="Shelf area" value={shelf.shelfArea}
+                        <input type="text" placeholder="Shelf / products" value={shelf.shelfArea}
                           onChange={e => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], shelfArea: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })}
                           className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                         <button type="button"
                           onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: p.shelvesProducts.individualShelves.filter((_, i) => i !== idx) } }))}
                           className="p-2 text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
                       </div>
-                      <RatingButtons value={shelf.rating}
-                        onChange={rating => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], rating }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })} />
-                      <textarea placeholder="Observation..." value={shelf.observation} rows={1}
-                        onChange={e => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], observation: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })}
-                        className="mt-2 w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
+                      <div className="space-y-2 mt-1">
+                        <div>
+                          <p className="text-xs text-slate-500 mb-1">Shelf cleanliness</p>
+                          <RatingButtons value={shelf.shelfCleanliness || 0}
+                            onChange={v => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], shelfCleanliness: v }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })} />
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-500 mb-1">Drug cleanliness</p>
+                          <RatingButtons value={shelf.drugCleanliness || 0}
+                            onChange={v => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], drugCleanliness: v }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })} />
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-500 mb-1">No empty spots (stockouts)</p>
+                          <RatingButtons value={shelf.noEmptySpots || 0}
+                            onChange={v => upd(p => { const s = [...p.shelvesProducts.individualShelves]; s[idx] = { ...s[idx], noEmptySpots: v }; return { ...p, shelvesProducts: { ...p.shelvesProducts, individualShelves: s } }; })} />
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1057,6 +1200,109 @@ function BranchVisitContent() {
                 <button onClick={() => setShowPreview(false)} className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors">Close</button>
                 <button onClick={exportPDF} className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 transition-colors flex items-center gap-2">
                   <Download className="w-4 h-4" /> Export PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Template Editor Modal */}
+      {showTemplateEditor && draftTemplate && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="bg-white border-b border-slate-100 px-6 py-5 flex items-center justify-between sticky top-0 z-10">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">Edit Defaults — {templateEditorBranch}</h2>
+                <p className="text-sm text-slate-500">Pre-fill staff and shelves for every new inspection</p>
+              </div>
+              <button onClick={() => setShowTemplateEditor(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              {/* Staff defaults */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-slate-800">Staff</h3>
+                  <button type="button"
+                    onClick={() => setDraftTemplate(prev => prev ? { ...prev, staff: [...prev.staff, { name: "" }] } : prev)}
+                    className="flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-700 font-medium">
+                    <Plus className="w-4 h-4" /> Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {draftTemplate.staff.length === 0 && <p className="text-sm text-slate-400 italic">No staff added</p>}
+                  {draftTemplate.staff.map((s, i) => (
+                    <div key={i} className="flex gap-2">
+                      <input type="text" placeholder="Staff name" value={s.name}
+                        onChange={e => setDraftTemplate(prev => { if (!prev) return prev; const st = [...prev.staff]; st[i] = { name: e.target.value }; return { ...prev, staff: st }; })}
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                      <button type="button"
+                        onClick={() => setDraftTemplate(prev => prev ? { ...prev, staff: prev.staff.filter((_, j) => j !== i) } : prev)}
+                        className="p-2 text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Shelf defaults */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-slate-800">Shelves</h3>
+                  <button type="button"
+                    onClick={() => setDraftTemplate(prev => prev ? { ...prev, shelves: [...prev.shelves, { workerName: "", shelfArea: "" }] } : prev)}
+                    className="flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-700 font-medium">
+                    <Plus className="w-4 h-4" /> Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {draftTemplate.shelves.length === 0 && <p className="text-sm text-slate-400 italic">No shelves added</p>}
+                  {draftTemplate.shelves.map((s, i) => (
+                    <div key={i} className="flex gap-2">
+                      <input type="text" placeholder="Worker name" value={s.workerName}
+                        onChange={e => setDraftTemplate(prev => { if (!prev) return prev; const sh = [...prev.shelves]; sh[i] = { ...sh[i], workerName: e.target.value }; return { ...prev, shelves: sh }; })}
+                        className="w-36 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                      <input type="text" placeholder="Shelf / products" value={s.shelfArea}
+                        onChange={e => setDraftTemplate(prev => { if (!prev) return prev; const sh = [...prev.shelves]; sh[i] = { ...sh[i], shelfArea: e.target.value }; return { ...prev, shelves: sh }; })}
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                      <button type="button"
+                        onClick={() => setDraftTemplate(prev => prev ? { ...prev, shelves: prev.shelves.filter((_, j) => j !== i) } : prev)}
+                        className="p-2 text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-slate-100 px-6 py-4 flex justify-between items-center">
+              <button onClick={() => setShowTemplateEditor(false)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors">
+                Cancel
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const templates = getTemplates();
+                    templates[templateEditorBranch] = draftTemplate;
+                    saveTemplates(templates);
+                    setShowTemplateEditor(false);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors">
+                  Save for next time
+                </button>
+                <button
+                  onClick={() => {
+                    const templates = getTemplates();
+                    templates[templateEditorBranch] = draftTemplate;
+                    saveTemplates(templates);
+                    const { staffEntries, individualShelves } = templateToEntries(draftTemplate);
+                    updateBranch(templateEditorBranch, p => ({
+                      ...p,
+                      personnel: { ...p.personnel, staffEntries },
+                      shelvesProducts: { ...p.shelvesProducts, individualShelves },
+                    }));
+                    setShowTemplateEditor(false);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-500 text-white font-medium hover:bg-emerald-600 transition-colors">
+                  Save &amp; Apply now
                 </button>
               </div>
             </div>
