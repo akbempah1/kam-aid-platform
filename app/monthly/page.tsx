@@ -65,7 +65,12 @@ function MonthlyContent() {
   const [newExpenseName, setNewExpenseName] = useState("");
   const [showDashboard, setShowDashboard] = useState(false);
   const [allWeekly, setAllWeekly] = useState<WeeklyReport[]>([]);
-  const [weeklySource, setWeeklySource] = useState<{ count: number; weeks: string[] } | null>(null);
+  const [loadingWeekly, setLoadingWeekly] = useState(false);
+  const [weeklySource, setWeeklySource] = useState<{
+    count: number;
+    weeks: string[];
+    totals: { oyarifa: number; ghanaFlag: number; madina: number };
+  } | null>(null);
   const [autoFilledFields, setAutoFilledFields] = useState<Set<ExpenseKey>>(new Set());
 
   // Load report if editing
@@ -151,13 +156,30 @@ function MonthlyContent() {
 
     setWeeklySource({
       count: relevant.length,
-      weeks: relevant.map(w => {
-        const s = new Date(w.weekStart);
-        const e = new Date(w.weekEnd);
-        return `${s.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ${e.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`;
-      }),
+      totals: { oyarifa: oya, ghanaFlag: gf, madina: mad },
+      weeks: relevant
+        .sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime())
+        .map(w => {
+          const s = new Date(w.weekStart);
+          const e = new Date(w.weekEnd);
+          return `${s.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ${e.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`;
+        }),
     });
   }, []);
+
+  // Always re-fetches fresh data so newly added weekly reports are included
+  const loadFromWeekly = async () => {
+    setLoadingWeekly(true);
+    try {
+      const fresh = await weeklyReports.list();
+      setAllWeekly(fresh);
+      applyWeeklyData(month, year, fresh);
+    } catch {
+      alert("Could not fetch weekly reports. Please check your connection and try again.");
+    } finally {
+      setLoadingWeekly(false);
+    }
+  };
 
   // Auto-apply when creating a new report and month/year changes
   useEffect(() => {
@@ -356,23 +378,34 @@ const handleFileData = (data: {
 
       {/* Branch Sales */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-6 shadow-sm">
-        <div className="flex items-start justify-between mb-4">
-          <div>
+        <div className="flex items-start justify-between mb-4 gap-4">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-slate-800">Sales Revenue by Branch</h2>
             {weeklySource ? (
-              <p className="text-xs text-emerald-600 mt-0.5">
-                Loaded from {weeklySource.count} weekly report{weeklySource.count !== 1 ? "s" : ""}
-                <span className="text-slate-400 ml-1">({weeklySource.weeks.join(", ")})</span>
+              <div className="mt-1 space-y-0.5">
+                <p className="text-xs text-emerald-600 font-medium">
+                  Loaded from {weeklySource.count} week{weeklySource.count !== 1 ? "s" : ""} in {MONTHS[month]} {year}
+                </p>
+                <p className="text-xs text-slate-400">{weeklySource.weeks.join(" · ")}</p>
+                <p className="text-xs text-slate-500">
+                  Oyarifa: GHS {weeklySource.totals.oyarifa.toLocaleString()} &nbsp;·&nbsp;
+                  Ghana Flag: GHS {weeklySource.totals.ghanaFlag.toLocaleString()} &nbsp;·&nbsp;
+                  Madina: GHS {weeklySource.totals.madina.toLocaleString()}
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 mt-0.5">
+                {loadingWeekly ? "Fetching weekly reports…" : `Click 'Load from weekly' to pull ${MONTHS[month]} data`}
               </p>
-            ) : allWeekly.length > 0 ? (
-              <p className="text-xs text-slate-400 mt-0.5">No weekly reports found for {MONTHS[month]} {year}</p>
-            ) : null}
+            )}
           </div>
           <button
-            onClick={() => applyWeeklyData(month, year, allWeekly)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-sky-600 border border-sky-200 rounded-lg hover:bg-sky-50 transition-colors shrink-0"
+            onClick={loadFromWeekly}
+            disabled={loadingWeekly}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-sky-600 border border-sky-200 rounded-lg hover:bg-sky-50 transition-colors shrink-0 disabled:opacity-50"
           >
-            <RefreshCw className="w-3.5 h-3.5" /> Load from weekly
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingWeekly ? "animate-spin" : ""}`} />
+            {loadingWeekly ? "Loading…" : "Load from weekly"}
           </button>
         </div>
         <div className="grid grid-cols-3 gap-4">
@@ -478,10 +511,11 @@ const handleFileData = (data: {
                 </p>
                 {weeklySource && (
                   <button
-                    onClick={() => applyWeeklyData(month, year, allWeekly)}
-                    className="flex items-center gap-1 text-xs text-sky-500 hover:text-sky-700 transition-colors"
+                    onClick={loadFromWeekly}
+                    disabled={loadingWeekly}
+                    className="flex items-center gap-1 text-xs text-sky-500 hover:text-sky-700 transition-colors disabled:opacity-50"
                   >
-                    <RefreshCw className="w-3 h-3" /> Reload
+                    <RefreshCw className={`w-3 h-3 ${loadingWeekly ? "animate-spin" : ""}`} /> Reload
                   </button>
                 )}
               </div>
