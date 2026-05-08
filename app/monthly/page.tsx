@@ -97,22 +97,45 @@ function MonthlyContent() {
 
   // Pull sales + expenses from weekly reports for the selected month
   const applyWeeklyData = useCallback((m: number, y: number, weekly: WeeklyReport[]) => {
-    // Use weekEnd month so a week ending May 4 counts for May even if it started April 28
+    const WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const monthStart = new Date(y, m, 1);
+    const monthEnd   = new Date(y, m + 1, 0, 23, 59, 59); // last moment of last day
+
+    // Include any week that overlaps with the month at all
     const relevant = weekly.filter(w => {
-      const end = new Date(w.weekEnd);
-      return end.getMonth() === m && end.getFullYear() === y;
+      const wStart = new Date(w.weekStart);
+      const wEnd   = new Date(w.weekEnd);
+      return wStart <= monthEnd && wEnd >= monthStart;
     });
     if (relevant.length === 0) {
       setWeeklySource(null);
       return;
     }
 
-    // Sum per-branch sales across all relevant weeks
+    // Sum per-branch sales — for cross-month weeks use daily breakdown
     let oya = 0, gf = 0, mad = 0;
     relevant.forEach(w => {
-      oya += w.totals.byBranch["Oyarifa"]    || 0;
-      gf  += w.totals.byBranch["Ghana Flag"] || 0;
-      mad += w.totals.byBranch["Madina"]     || 0;
+      const wStart = new Date(w.weekStart);
+      const wEnd   = new Date(w.weekEnd);
+      const fullyInMonth = wStart >= monthStart && wEnd <= monthEnd;
+
+      if (fullyInMonth) {
+        oya += w.totals.byBranch["Oyarifa"]    || 0;
+        gf  += w.totals.byBranch["Ghana Flag"] || 0;
+        mad += w.totals.byBranch["Madina"]     || 0;
+      } else {
+        // Partial week — only count the days that actually fall in this month
+        WEEK_DAYS.forEach((day, i) => {
+          const d = new Date(wStart);
+          d.setDate(wStart.getDate() + i);
+          if (d >= monthStart && d <= monthEnd) {
+            const ds = w.dailySales[day] || {};
+            oya += parseFloat(ds["Oyarifa"]    || "0") || 0;
+            gf  += parseFloat(ds["Ghana Flag"] || "0") || 0;
+            mad += parseFloat(ds["Madina"]     || "0") || 0;
+          }
+        });
+      }
     });
     setSales({
       oyarifa:   oya > 0 ? String(parseFloat(oya.toFixed(2)))  : "",
@@ -120,11 +143,19 @@ function MonthlyContent() {
       madina:    mad > 0 ? String(parseFloat(mad.toFixed(2)))   : "",
     });
 
-    // Route each expense item to a standard field or custom
+    // Route each expense item — only include from weeks where ≥4 days fall in this month
     const standardSums: Partial<Record<ExpenseKey, number>> = {};
     const customMap: Record<string, number> = {};
 
     relevant.forEach(w => {
+      const wStart = new Date(w.weekStart);
+      const daysInMonth = WEEK_DAYS.filter((_, i) => {
+        const d = new Date(wStart);
+        d.setDate(wStart.getDate() + i);
+        return d >= monthStart && d <= monthEnd;
+      }).length;
+      if (daysInMonth < 4) return; // majority of week is in another month
+
       w.expenses.forEach(e => {
         const name = e.name.trim();
         if (!name) return;

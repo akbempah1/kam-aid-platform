@@ -53,7 +53,7 @@ export default function HistoryPage() {
   const [activeTab, setActiveTab] = useState<"monthly" | "weekly" | "branch" | "shortages">("monthly");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const router = useRouter();
 
   // Load all reports from database
@@ -102,16 +102,39 @@ export default function HistoryPage() {
     }
   };
 
-  // Download branch visit report as PDF
   const downloadBranchVisit = async (id: number) => {
-    setDownloadingId(id);
+    setDownloadingKey(`branch-${id}`);
     try {
       const report = await dataService.branchVisits.get(id);
       generateBranchVisitPDF(report as unknown as Record<string, unknown>);
     } catch {
       alert("Failed to generate report. Please try again.");
     } finally {
-      setDownloadingId(null);
+      setDownloadingKey(null);
+    }
+  };
+
+  const downloadWeeklyReport = async (id: number) => {
+    setDownloadingKey(`weekly-${id}`);
+    try {
+      const report = await dataService.weeklyReports.get(id);
+      generateWeeklyPDF(report);
+    } catch {
+      alert("Failed to generate report. Please try again.");
+    } finally {
+      setDownloadingKey(null);
+    }
+  };
+
+  const downloadMonthlyReport = async (id: number) => {
+    setDownloadingKey(`monthly-${id}`);
+    try {
+      const report = await dataService.monthlyReports.get(id);
+      generateMonthlyPDF(report);
+    } catch {
+      alert("Failed to generate report. Please try again.");
+    } finally {
+      setDownloadingKey(null);
     }
   };
 
@@ -223,6 +246,8 @@ export default function HistoryPage() {
                   metricColor={report.totals?.netProfit >= 0 ? "emerald" : "red"}
                   onEdit={() => router.push(`/?edit=${report.id}`)}
                   onDelete={() => deleteReport("monthly", report.id)}
+                  onDownload={() => downloadMonthlyReport(report.id)}
+                  downloading={downloadingKey === `monthly-${report.id}`}
                 />
               ))}
             </div>
@@ -249,6 +274,8 @@ export default function HistoryPage() {
                   metricColor="slate"
                   onEdit={() => router.push(`/weekly?edit=${report.id}`)}
                   onDelete={() => deleteReport("weekly", report.id)}
+                  onDownload={() => downloadWeeklyReport(report.id)}
+                  downloading={downloadingKey === `weekly-${report.id}`}
                 />
               ))}
             </div>
@@ -280,7 +307,7 @@ export default function HistoryPage() {
                   onEdit={() => router.push(`/branch-visit?edit=${report.id}`)}
                   onDelete={() => deleteReport("branch", report.id)}
                   onDownload={() => downloadBranchVisit(report.id)}
-                  downloading={downloadingId === report.id}
+                  downloading={downloadingKey === `branch-${report.id}`}
                 />
               ))}
             </div>
@@ -318,7 +345,154 @@ export default function HistoryPage() {
   );
 }
 
-// ─── PDF export for history ───────────────────────────────────────────────────
+// ─── Weekly PDF export ────────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function generateWeeklyPDF(report: any) {
+  const win = window.open("", "_blank");
+  if (!win) { alert("Please allow popups to download the report"); return; }
+
+  const BRANCHES = ["Oyarifa", "Ghana Flag", "Madina"];
+  const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const fmtDate = (s: string) => s ? new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+
+  const getTotalByBranch = (branch: string) =>
+    DAYS.reduce((sum, day) => sum + (parseFloat((report.dailySales[day] || {})[branch] || "0") || 0), 0);
+  const getTotalByDay = (day: string) =>
+    BRANCHES.reduce((sum, b) => sum + (parseFloat((report.dailySales[day] || {})[b] || "0") || 0), 0);
+  const grandTotal = BRANCHES.reduce((sum, b) => sum + getTotalByBranch(b), 0);
+  const totalExp = (report.expenses || []).reduce((sum: number, e: any) => sum + (parseFloat(e.amount) || 0), 0);
+
+  const html = `<!DOCTYPE html><html><head><title>KAM AID Weekly Report</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:40px;color:#1e293b;line-height:1.5}
+    .header{display:flex;align-items:center;gap:20px;margin-bottom:30px;padding-bottom:20px;border-bottom:2px solid #e2e8f0}
+    .logo{width:48px;height:48px;background:linear-gradient(135deg,#8b5cf6,#7c3aed);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;color:white}
+    .title{font-size:24px;font-weight:700}.subtitle{font-size:13px;color:#64748b;margin-top:4px}
+    .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+    .kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px}
+    .kpi.hi{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white;border:none}
+    .kpi-lbl{font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:6px}
+    .kpi.hi .kpi-lbl{color:rgba(255,255,255,.8)}.kpi-val{font-size:20px;font-weight:700}
+    .kpi.hi .kpi-val{color:white}.kpi-sub{font-size:11px;color:#64748b;margin-top:3px}
+    table{width:100%;border-collapse:collapse;margin-bottom:24px;font-size:13px}
+    th,td{padding:10px;text-align:left;border-bottom:1px solid #e2e8f0}
+    th{background:#f8fafc;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b}
+    .tr{text-align:right}.fw{font-weight:700}.tot-row{background:#f1f5f9;font-weight:700}
+    .sec-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1e293b;border-bottom:2px solid #8b5cf6;display:inline-block;padding-bottom:4px;margin-bottom:14px}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px}
+    .exp-row{display:flex;justify-content:space-between;padding:10px;background:#f8fafc;border-radius:8px;margin-bottom:6px;font-size:13px}
+    .footer{margin-top:32px;padding-top:16px;border-top:2px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b}
+    @media print{body{padding:20px}-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  </style></head><body>
+  <div class="header"><div class="logo">📅</div><div>
+    <div class="title">Weekly Operating Report</div>
+    <div class="subtitle">${fmtDate(report.weekStart)} – ${fmtDate(report.weekEnd)} &bull; KAM AID Pharmacy</div>
+  </div></div>
+  <div class="kpis">
+    <div class="kpi hi"><div class="kpi-lbl">Total Weekly Sales</div><div class="kpi-val">GHS ${grandTotal.toLocaleString()}</div></div>
+    ${BRANCHES.map(b => `<div class="kpi"><div class="kpi-lbl">${b}</div><div class="kpi-val">GHS ${getTotalByBranch(b).toLocaleString()}</div><div class="kpi-sub">${grandTotal > 0 ? ((getTotalByBranch(b)/grandTotal)*100).toFixed(1) : 0}% of total</div></div>`).join("")}
+  </div>
+  <div class="sec-title">Daily Sales Breakdown</div>
+  <table><thead><tr><th>Day</th>${BRANCHES.map(b=>`<th class="tr">${b}</th>`).join("")}<th class="tr">Total</th></tr></thead><tbody>
+    ${DAYS.map(day=>`<tr><td>${day}</td>${BRANCHES.map(b=>`<td class="tr">GHS ${(parseFloat((report.dailySales[day]||{})[b]||"0")||0).toLocaleString()}</td>`).join("")}<td class="tr fw">GHS ${getTotalByDay(day).toLocaleString()}</td></tr>`).join("")}
+    <tr class="tot-row"><td>Weekly Total</td>${BRANCHES.map(b=>`<td class="tr">GHS ${getTotalByBranch(b).toLocaleString()}</td>`).join("")}<td class="tr">GHS ${grandTotal.toLocaleString()}</td></tr>
+  </tbody></table>
+  <div class="two">
+    <div><div class="sec-title">Weekly Expenses (GHS ${totalExp.toLocaleString()})</div>
+      ${(report.expenses||[]).length > 0 ? (report.expenses||[]).map((e: any)=>`<div class="exp-row"><div><div style="font-weight:500">${e.name}</div><div style="font-size:11px;color:#64748b">${e.branch}</div></div><div style="font-weight:700">GHS ${(parseFloat(e.amount)||0).toLocaleString()}</div></div>`).join("") : '<p style="color:#94a3b8;text-align:center;padding:16px">No expenses recorded</p>'}
+    </div>
+    <div><div class="sec-title">Inventory Issues (${(report.issues||[]).length})</div>
+      ${(report.issues||[]).length > 0 ? (report.issues||[]).map((iss: any)=>`<div class="exp-row"><div><div style="font-weight:500">${iss.item}</div><div style="font-size:11px;color:#64748b">${iss.branch}</div></div><div style="font-size:12px;color:#92400e">${iss.issue}</div></div>`).join("") : '<p style="color:#94a3b8;text-align:center;padding:16px">No issues reported</p>'}
+    </div>
+  </div>
+  <div class="footer">KAM AID Pharmacy &bull; Weekly Operating Report &bull; Generated ${new Date().toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"})}</div>
+  </body></html>`;
+
+  win.document.write(html);
+  win.document.close();
+  win.onload = () => setTimeout(() => win.print(), 500);
+}
+
+// ─── Monthly PDF export ────────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function generateMonthlyPDF(report: any) {
+  const win = window.open("", "_blank");
+  if (!win) { alert("Please allow popups to download the report"); return; }
+
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const sales = report.sales as { oyarifa: string; ghanaFlag: string; madina: string };
+  const expenses = report.expenses as Record<string, string>;
+  const customExpenses = (report.customExpenses || []) as { id: number; name: string; amount: string }[];
+  const totals = report.totals as { totalSales: number; grossProfit: number; netProfit: number; totalExpenses: number };
+  const fmt = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const c = (v: number) => v >= 0 ? "#059669" : "#dc2626";
+
+  const expenseRows = [
+    { label: "Salaries & Wages", value: expenses.salaries },
+    { label: "Rent", value: expenses.rent },
+    { label: "Electricity", value: expenses.electricity },
+    { label: "Data / Internet", value: expenses.phone },
+    { label: "Petty Cash", value: expenses.pettyCash },
+    { label: "Maintenance & Repairs", value: expenses.maintenance },
+    { label: "Miscellaneous", value: expenses.miscellaneous },
+    ...customExpenses.map(e => ({ label: e.name, value: e.amount })),
+  ].filter(r => parseFloat(r.value) > 0);
+
+  const html = `<!DOCTYPE html><html><head><title>KAM AID Monthly Report</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:40px;color:#1e293b;line-height:1.5}
+    .header{padding-bottom:20px;border-bottom:2px solid #e2e8f0;margin-bottom:28px}
+    .title{font-size:24px;font-weight:700}.subtitle{font-size:13px;color:#64748b;margin-top:4px}
+    .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+    .kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px}
+    .kpi-lbl{font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:6px}
+    .kpi-val{font-size:20px;font-weight:700}
+    .sec{margin-bottom:24px}
+    .sec-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1e293b;border-bottom:2px solid #0ea5e9;display:inline-block;padding-bottom:4px;margin-bottom:14px}
+    table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px}
+    th,td{padding:10px;text-align:left;border-bottom:1px solid #e2e8f0}
+    th{background:#f8fafc;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b}
+    .tr{text-align:right}.fw{font-weight:700}
+    .tot-row{background:#f1f5f9;font-weight:700}
+    .footer{margin-top:32px;padding-top:16px;border-top:2px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b}
+    @media print{body{padding:20px}-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  </style></head><body>
+  <div class="header">
+    <div class="title">Monthly Financial Report</div>
+    <div class="subtitle">${MONTHS[report.month]} ${report.year} &bull; KAM AID Pharmacy</div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="kpi-lbl">Total Sales</div><div class="kpi-val">GHS ${fmt(totals.totalSales)}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Gross Profit</div><div class="kpi-val" style="color:${c(totals.grossProfit)}">GHS ${fmt(totals.grossProfit)}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Net Profit</div><div class="kpi-val" style="color:${c(totals.netProfit)}">GHS ${fmt(totals.netProfit)}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Total Expenses</div><div class="kpi-val">GHS ${fmt(totals.totalExpenses)}</div></div>
+  </div>
+  <div class="sec"><div class="sec-title">Sales by Branch</div>
+    <table><thead><tr><th>Branch</th><th class="tr">Sales (GHS)</th><th class="tr">% of Total</th></tr></thead><tbody>
+      ${[["Oyarifa",sales.oyarifa],["Ghana Flag",sales.ghanaFlag],["Madina",sales.madina]].map(([b,v])=>`<tr><td>${b}</td><td class="tr">${fmt(parseFloat(v)||0)}</td><td class="tr">${totals.totalSales>0?((parseFloat(v)||0)/totals.totalSales*100).toFixed(1):0}%</td></tr>`).join("")}
+      <tr class="tot-row"><td>Total</td><td class="tr">${fmt(totals.totalSales)}</td><td class="tr">100%</td></tr>
+    </tbody></table>
+  </div>
+  <div class="sec"><div class="sec-title">Cost of Goods Sold</div>
+    <table><tbody><tr><td>Total Purchases</td><td class="tr fw">GHS ${fmt(parseFloat(report.cogs)||0)}</td></tr></tbody></table>
+  </div>
+  <div class="sec"><div class="sec-title">Operating Expenses</div>
+    <table><thead><tr><th>Item</th><th class="tr">Amount (GHS)</th></tr></thead><tbody>
+      ${expenseRows.map(r=>`<tr><td>${r.label}</td><td class="tr">${fmt(parseFloat(r.value)||0)}</td></tr>`).join("")}
+      <tr class="tot-row"><td>Total Expenses</td><td class="tr">GHS ${fmt(totals.totalExpenses)}</td></tr>
+    </tbody></table>
+  </div>
+  <div class="footer">KAM AID Pharmacy &bull; Monthly Financial Report &bull; Generated ${new Date().toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"})}</div>
+  </body></html>`;
+
+  win.document.write(html);
+  win.document.close();
+  win.onload = () => setTimeout(() => win.print(), 500);
+}
+
+// ─── PDF export for history ────────────────────────────────────────────────────
 
 function generateBranchVisitPDF(report: Record<string, unknown>) {
   const win = window.open("", "_blank");
