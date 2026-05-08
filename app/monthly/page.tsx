@@ -13,6 +13,26 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December"
 ];
 
+// ─── Expense keyword routing ───────────────────────────────────────────────────
+
+type ExpenseKey = "salaries" | "rent" | "electricity" | "phone" | "pettyCash" | "maintenance" | "miscellaneous";
+
+const EXPENSE_RULES: { key: ExpenseKey; keywords: string[] }[] = [
+  { key: "electricity", keywords: ["electricity", "electric", "power", "ecg", "light bill", "utilities"] },
+  { key: "phone",       keywords: ["broadband", "router", "data", "internet", "airtime", "wifi", "wi-fi", "network bundle"] },
+  { key: "pettyCash",   keywords: ["petty cash", "petty"] },
+  { key: "maintenance", keywords: ["maintenance", "repair"] },
+  { key: "miscellaneous", keywords: ["miscellaneous", "misc"] },
+];
+
+function matchExpenseKey(name: string): ExpenseKey | null {
+  const lower = name.toLowerCase();
+  for (const rule of EXPENSE_RULES) {
+    if (rule.keywords.some(k => lower.includes(k))) return rule.key;
+  }
+  return null;
+}
+
 function MonthlyContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -46,6 +66,7 @@ function MonthlyContent() {
   const [showDashboard, setShowDashboard] = useState(false);
   const [allWeekly, setAllWeekly] = useState<WeeklyReport[]>([]);
   const [weeklySource, setWeeklySource] = useState<{ count: number; weeks: string[] } | null>(null);
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<ExpenseKey>>(new Set());
 
   // Load report if editing
   useEffect(() => {
@@ -93,15 +114,36 @@ function MonthlyContent() {
       madina:    mad > 0 ? String(parseFloat(mad.toFixed(2)))   : "",
     });
 
-    // Group and sum all weekly expense line items by name
-    const expMap: Record<string, number> = {};
+    // Route each expense item to a standard field or custom
+    const standardSums: Partial<Record<ExpenseKey, number>> = {};
+    const customMap: Record<string, number> = {};
+
     relevant.forEach(w => {
       w.expenses.forEach(e => {
-        const key = e.name.trim();
-        if (key) expMap[key] = (expMap[key] || 0) + (parseFloat(e.amount) || 0);
+        const name = e.name.trim();
+        if (!name) return;
+        const matched = matchExpenseKey(name);
+        if (matched) {
+          standardSums[matched] = (standardSums[matched] || 0) + (parseFloat(e.amount) || 0);
+        } else {
+          customMap[name] = (customMap[name] || 0) + (parseFloat(e.amount) || 0);
+        }
       });
     });
-    const loaded = Object.entries(expMap)
+
+    // Reset auto-fillable standard fields, then apply matches
+    const filled = new Set<ExpenseKey>();
+    const patch: Partial<Record<ExpenseKey, string>> = {
+      electricity: "", phone: "", pettyCash: "", maintenance: "", miscellaneous: "",
+    };
+    (Object.entries(standardSums) as [ExpenseKey, number][]).forEach(([k, v]) => {
+      if (v > 0) { patch[k] = String(parseFloat(v.toFixed(2))); filled.add(k); }
+    });
+    setExpenses(prev => ({ ...prev, ...patch }));
+    setAutoFilledFields(filled);
+
+    // Unmatched items → custom expenses
+    const loaded = Object.entries(customMap)
       .filter(([, amt]) => amt > 0)
       .map(([name, amt], i) => ({ id: Date.now() + i, name, amount: String(parseFloat(amt.toFixed(2))) }));
     setCustomExpenses(loaded);
@@ -138,6 +180,8 @@ function MonthlyContent() {
     setCogs("");
     setExpenses({ salaries: "", rent: "", electricity: "", phone: "", pettyCash: "", maintenance: "", miscellaneous: "" });
     setCustomExpenses([]);
+    setWeeklySource(null);
+    setAutoFilledFields(new Set());
   };
 
   // Save report
@@ -399,13 +443,18 @@ const handleFileData = (data: {
             { key: "salaries",      label: "Salaries & Wages" },
             { key: "rent",          label: "Rent" },
             { key: "electricity",   label: "Electricity" },
-            { key: "phone",         label: "Phone & Internet" },
+            { key: "phone",         label: "Data / Internet" },
             { key: "pettyCash",     label: "Petty Cash" },
             { key: "maintenance",   label: "Maintenance & Repairs" },
             { key: "miscellaneous", label: "Miscellaneous" },
           ].map((item) => (
             <div key={item.key} className="flex items-center gap-4">
-              <label className="w-48 text-sm font-medium text-slate-600">{item.label}</label>
+              <label className="w-48 text-sm font-medium text-slate-600 flex items-center gap-1.5">
+                {item.label}
+                {autoFilledFields.has(item.key as ExpenseKey) && (
+                  <span className="text-xs font-normal text-emerald-500">· from weekly</span>
+                )}
+              </label>
               <div className="relative flex-1 max-w-xs">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">GHS</span>
                 <input
