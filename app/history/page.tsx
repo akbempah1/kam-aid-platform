@@ -1,8 +1,9 @@
 "use client";
 import ProtectedLayout from "../components/ProtectedLayout";
+import ReportViewModal from "../components/ReportViewModal";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, Pencil, Calendar, LayoutDashboard, MapPin, Package, Download } from "lucide-react";
+import { Trash2, Pencil, Calendar, LayoutDashboard, MapPin, Package, Download, Eye } from "lucide-react";
 import * as dataService from "@/lib/dataService";
 
 const MONTHS = [
@@ -54,6 +55,11 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  const [viewModal, setViewModal] = useState<{ isOpen: boolean; type: "monthly" | "weekly" | "branch" | "shortages"; data: any }>({
+    isOpen: false,
+    type: "monthly",
+    data: null,
+  });
   const router = useRouter();
 
   // Load all reports from database
@@ -135,6 +141,25 @@ export default function HistoryPage() {
       alert("Failed to generate report. Please try again.");
     } finally {
       setDownloadingKey(null);
+    }
+  };
+
+  // View functions
+  const viewMonthlyReport = async (id: number) => {
+    try {
+      const report = await dataService.monthlyReports.get(id);
+      setViewModal({ isOpen: true, type: "monthly", data: report });
+    } catch {
+      alert("Failed to load report. Please try again.");
+    }
+  };
+
+  const viewWeeklyReport = async (id: number) => {
+    try {
+      const report = await dataService.weeklyReports.get(id);
+      setViewModal({ isOpen: true, type: "weekly", data: report });
+    } catch {
+      alert("Failed to load report. Please try again.");
     }
   };
 
@@ -244,7 +269,8 @@ export default function HistoryPage() {
                   metric={`GHS ${report.totals?.netProfit?.toLocaleString() || 0}`}
                   metricLabel="Net Profit"
                   metricColor={report.totals?.netProfit >= 0 ? "emerald" : "red"}
-                  onEdit={() => router.push(`/?edit=${report.id}`)}
+                  onView={() => viewMonthlyReport(report.id)}
+                  onEdit={() => router.push(`/monthly?edit=${report.id}`)}
                   onDelete={() => deleteReport("monthly", report.id)}
                   onDownload={() => downloadMonthlyReport(report.id)}
                   downloading={downloadingKey === `monthly-${report.id}`}
@@ -272,6 +298,7 @@ export default function HistoryPage() {
                   metric={`GHS ${report.totals?.grandTotalSales?.toLocaleString() || 0}`}
                   metricLabel="Total Sales"
                   metricColor="slate"
+                  onView={() => viewWeeklyReport(report.id)}
                   onEdit={() => router.push(`/weekly?edit=${report.id}`)}
                   onDelete={() => deleteReport("weekly", report.id)}
                   onDownload={() => downloadWeeklyReport(report.id)}
@@ -341,6 +368,12 @@ export default function HistoryPage() {
         </>
       )}
     </div>
+    <ReportViewModal
+      isOpen={viewModal.isOpen}
+      onClose={() => setViewModal({ ...viewModal, isOpen: false })}
+      type={viewModal.type}
+      data={viewModal.data}
+    />
     </ProtectedLayout>
   );
 }
@@ -671,6 +704,7 @@ function ReportCard({
   onEdit,
   onDelete,
   onDownload,
+  onView,
   downloading,
 }: {
   badge: string;
@@ -684,6 +718,7 @@ function ReportCard({
   onEdit: () => void;
   onDelete: () => void;
   onDownload?: () => void;
+  onView?: () => void;
   downloading?: boolean;
 }) {
   const badgeStyles: Record<string, { bg: string; text: string }> = {
@@ -737,6 +772,15 @@ function ReportCard({
               ? <div className="w-4 h-4 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
               : <Download className="w-4 h-4" />}
             <span className="hidden sm:inline">Download</span>
+          </button>
+        )}
+        {onView && (
+          <button
+            onClick={onView}
+            className="p-2 text-slate-400 hover:text-violet-500 hover:bg-violet-50 rounded-lg transition-colors shrink-0"
+            title="View Report"
+          >
+            <Eye className="w-5 h-5" />
           </button>
         )}
         <button

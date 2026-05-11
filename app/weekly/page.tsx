@@ -209,6 +209,24 @@ function WeeklyReportContent() {
     });
   };
 
+  // Get date for a day of the week
+  const getDayWithDate = (dayIndex: number) => {
+    if (!weekStart) return DAYS[dayIndex];
+    const start = new Date(weekStart);
+    const date = new Date(start);
+    date.setDate(start.getDate() + dayIndex);
+    const dayName = DAYS[dayIndex];
+    const formatted = date.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+    return `${dayName} ${formatted}`;
+  };
+
+  // Get date for a day name
+  const getDayNameWithDate = (dayName: string) => {
+    const dayIndex = DAYS.indexOf(dayName);
+    if (dayIndex === -1) return dayName;
+    return getDayWithDate(dayIndex);
+  };
+
   // Export PDF
   const exportPDF = () => {
     const printWindow = window.open('', '_blank');
@@ -386,9 +404,9 @@ function WeeklyReportContent() {
               </tr>
             </thead>
             <tbody>
-              ${DAYS.map(day => `
+              ${DAYS.map((day, dayIndex) => `
                 <tr>
-                  <td>${day}</td>
+                  <td>${getDayWithDate(dayIndex)}</td>
                   ${BRANCHES.map(branch => `
                     <td class="text-right">GHS ${(parseFloat(dailySales[day][branch]) || 0).toLocaleString()}</td>
                   `).join('')}
@@ -536,11 +554,11 @@ function WeeklyReportContent() {
               </tr>
             </thead>
             <tbody>
-              {DAYS.map(day => (
+              {DAYS.map((day, dayIndex) => (
                 <tr key={day} className={`border-b border-slate-100 ${day === bestOverallDay ? "bg-emerald-50/40" : day === worstOverallDay ? "bg-amber-50/40" : ""}`}>
                   <td className="py-3 px-4 font-medium text-slate-800">
                     <div className="flex items-center gap-2">
-                      {day}
+                      {getDayWithDate(dayIndex)}
                       {day === bestOverallDay && <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Best</span>}
                       {day === worstOverallDay && <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Worst</span>}
                     </div>
@@ -601,11 +619,11 @@ function WeeklyReportContent() {
                   <p className="text-xs font-semibold text-slate-500 mb-2">{branch}</p>
                   <div className="flex gap-2 flex-wrap">
                     <span className="text-xs bg-emerald-100 text-emerald-700 font-semibold px-2 py-1 rounded-lg">
-                      ↑ {best} — GHS {parseFloat(dailySales[best][branch]).toLocaleString()}
+                      ↑ {getDayNameWithDate(best)} — GHS {parseFloat(dailySales[best][branch]).toLocaleString()}
                     </span>
                     {worst && (
                       <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-1 rounded-lg">
-                        ↓ {worst} — GHS {parseFloat(dailySales[worst][branch]).toLocaleString()}
+                        ↓ {getDayNameWithDate(worst)} — GHS {parseFloat(dailySales[worst][branch]).toLocaleString()}
                       </span>
                     )}
                   </div>
