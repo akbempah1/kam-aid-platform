@@ -38,12 +38,13 @@ model BranchVisit {
   visitDate       DateTime
   branch          String?
   visitedBy       String
-  branchChecklist Json     @default("{}")
-  issues          Json     @default("[]")
-  actionItems     Json     @default("[]")
-  branchRatings   Json     @default("{}")
-  generalNotes    String   @default("")
-  stats           Json
+  branchChecklist      Json     @default("{}")
+  issues               Json     @default("[]")
+  actionItems          Json     @default("[]")
+  branchRatings        Json     @default("{}")
+  generalNotes         String   @default("")
+  stats                Json
+  cashReconciliation   Json     @default("{}")
   createdAt       DateTime @default(now())
 }
 

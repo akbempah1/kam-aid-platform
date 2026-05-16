@@ -25,6 +25,8 @@ type ShelfEntry     = { id: number; workerName: string; shelfArea: string; shelf
 type StaffEntry     = { id: number; name: string; present: boolean | null; inLabCoat: boolean | null };
 type ActionItem     = { id: number; action: string; dueDate: string; responsible: string; branch: string };
 type AutoIssue      = { id: number; description: string; priority: "high" | "medium"; branch: string; assignedTo: string };
+type CashShiftEntry = { date: string; shift: "Morning" | "Afternoon"; pos: string; onHand: string };
+type CashReconciliation = Record<string, CashShiftEntry[]>;
 
 type BranchInspection = {
   exterior:      { frontCleanliness: QualityItem; signageWorking: BinaryItem };
@@ -55,6 +57,49 @@ type InspectionData = Record<string, BranchInspection>;
 const RATING_LABELS: Record<number, string> = {
   0: "", 1: "Very Poor", 2: "Poor", 3: "Acceptable", 4: "Good", 5: "Excellent",
 };
+
+const CASH_DIFF_HIGH = 20;
+const CASH_DIFF_LOW  = -5;
+
+function get7Days(visitDate: string): string[] {
+  if (!visitDate) return [];
+  const days: string[] = [];
+  const base = new Date(visitDate + "T12:00:00");
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(base);
+    d.setDate(d.getDate() - i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+function createCashRecon(visitDate: string): CashReconciliation {
+  const days = get7Days(visitDate);
+  const recon: CashReconciliation = {};
+  BRANCHES.forEach(branch => {
+    recon[branch] = days.flatMap(date => ([
+      { date, shift: "Morning" as const,   pos: "", onHand: "" },
+      { date, shift: "Afternoon" as const, pos: "", onHand: "" },
+    ]));
+  });
+  return recon;
+}
+
+function getCashDiff(pos: string, onHand: string): number | null {
+  const p = parseFloat(pos), oh = parseFloat(onHand);
+  if (isNaN(p) || isNaN(oh) || pos === "" || onHand === "") return null;
+  return oh - p;
+}
+
+function isCashFlagged(diff: number | null): boolean {
+  return diff !== null && (diff > CASH_DIFF_HIGH || diff < CASH_DIFF_LOW);
+}
+
+function fmtDay(iso: string): string {
+  if (!iso) return iso;
+  const [, m, d] = iso.split("-");
+  return `${d}/${m}`;
+}
 
 // ─── Branch templates ─────────────────────────────────────────────────────────
 
@@ -253,6 +298,7 @@ function BranchVisitContent() {
   const [actionItems, setActionItems] = useState<ActionItem[]>([]);
   const [newAction, setNewAction]   = useState({ action: "", dueDate: "", responsible: "", branch: "Oyarifa" });
   const [generalNotes, setGeneralNotes] = useState("");
+  const [cashReconciliation, setCashReconciliation] = useState<CashReconciliation>({});
   const [showPreview, setShowPreview]   = useState(false);
   const [saving, setSaving]             = useState(false);
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
@@ -370,6 +416,14 @@ function BranchVisitContent() {
       // Customer complaints
       if (d.adminComms.customerComplaints.value === true)
         issues.push({ id: id++, description: `Customer complaints reported${d.adminComms.customerComplaints.notes ? ` — ${d.adminComms.customerComplaints.notes}` : ""}`, priority: "medium", branch, assignedTo: "" });
+      // Cash reconciliation — flagged shifts
+      (cashReconciliation[branch] || []).forEach(entry => {
+        const diff = getCashDiff(entry.pos, entry.onHand);
+        if (isCashFlagged(diff)) {
+          const sign = diff! > 0 ? "+" : "";
+          issues.push({ id: id++, description: `Cash difference: ${entry.shift} shift on ${fmtDay(entry.date)} — GHS ${sign}${diff!.toFixed(2)} (POS: ${entry.pos}, On Hand: ${entry.onHand})`, priority: Math.abs(diff!) > 50 ? "high" : "medium", branch, assignedTo: "" });
+        }
+      });
     });
     return issues;
   };
@@ -393,6 +447,12 @@ function BranchVisitContent() {
       }
       setActionItems(report.actionItems as ActionItem[]);
       setGeneralNotes(report.generalNotes || "");
+      const storedRecon = report.cashReconciliation as CashReconciliation;
+      if (storedRecon && Object.keys(storedRecon).length > 0) {
+        setCashReconciliation(storedRecon);
+      } else {
+        setCashReconciliation(createCashRecon(report.visitDate.slice(0, 10)));
+      }
     }).catch(() => {});
   }, [editId]);
 
@@ -418,11 +478,19 @@ function BranchVisitContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Initialize cash recon dates when visitDate is set (new reports only)
+  useEffect(() => {
+    if (editId || !visitDate) return;
+    setCashReconciliation(createCashRecon(visitDate));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visitDate]);
+
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   const clearForm = () => {
     setReportId(null); setReportType("consolidated"); setVisitDate(""); setSelectedBranch("Oyarifa");
     setVisitedBy(""); setInspectionData(createInitialData()); setActionItems([]); setGeneralNotes("");
+    setCashReconciliation({});
     router.push("/branch-visit");
   };
 
@@ -438,7 +506,7 @@ function BranchVisitContent() {
       visitedBy,
       branchChecklist: inspectionData as unknown as Record<string, Record<string, { status: "pass" | "fail" | "na"; notes: string }>>,
       issues: autoIssues as unknown as { id: number; description: string; priority: string; branch: string; assignedTo: string }[],
-      actionItems, branchRatings: {}, generalNotes,
+      actionItems, branchRatings: {}, generalNotes, cashReconciliation,
       stats: {
         overall: { passCount: 0, failCount: 0, complianceRate: overall },
         byBranch: activeBranches.reduce((acc, b) => { acc[b] = { passCount: 0, failCount: 0, complianceRate: getBranchScore(b) }; return acc; }, {} as Record<string, { passCount: number; failCount: number; complianceRate: number }>),
@@ -545,6 +613,18 @@ function BranchVisitContent() {
             <div class="check-row"><span class="label">Closing</span><span class="obs">GHS ${(parseFloat(d.pettyCash.openingBalance || "0") - parseFloat(d.pettyCash.amountSpent || "0")).toFixed(2)}</span></div>
             ${d.pettyCash.notes ? `<div class="check-row"><span class="label">Notes</span><span class="obs">${d.pettyCash.notes}</span></div>` : ""}
           ` : ""}
+          ${(() => {
+            const entries = cashReconciliation[branch] || [];
+            const hasData = entries.some(e => e.pos || e.onHand);
+            if (!hasData) return "";
+            const rows = entries.map(e => {
+              const diff = getCashDiff(e.pos, e.onHand);
+              const flagged = isCashFlagged(diff);
+              const diffStr = diff !== null ? (diff > 0 ? "+" : "") + diff.toFixed(2) : "—";
+              return `<tr style="${flagged ? "background:#fee2e2" : ""}"><td>${fmtDay(e.date)}</td><td>${e.shift}</td><td>${e.pos || "—"}</td><td>${e.onHand || "—"}</td><td style="font-weight:700;color:${flagged ? "#dc2626" : "#059669"}">${diffStr}${flagged ? " ⚠" : ""}</td></tr>`;
+            }).join("");
+            return `<div class="cat-title">Cash Reconciliation — Last 7 Days</div><table class="inner-table"><tr><th>Date</th><th>Shift</th><th>POS (GHS)</th><th>On Hand (GHS)</th><th>Difference</th></tr>${rows}</table>`;
+          })()}
         </div>`;
     };
 
@@ -1044,6 +1124,76 @@ function BranchVisitContent() {
             <textarea placeholder="Describe what petty cash was used for..." value={d.pettyCash.notes} rows={3}
               onChange={e => upd(p => ({ ...p, pettyCash: { ...p.pettyCash, notes: e.target.value } }))}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
+          </SectionCard>
+
+          {/* 12. Cash Reconciliation */}
+          <SectionCard title="12. Cash Reconciliation — Last 7 Days" icon={<DollarSign className="w-4 h-4 text-blue-500" />}>
+            {(cashReconciliation[currentBranch] || []).length > 0 ? (
+              <div className="overflow-x-auto">
+                <div className="flex items-center gap-2 mb-3 text-xs text-slate-500">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-400 inline-block" /> Flagged: difference &gt; GHS {CASH_DIFF_HIGH} or &lt; GHS {CASH_DIFF_LOW}
+                </div>
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                      <th className="pb-2 pr-2 font-semibold">Date</th>
+                      <th className="pb-2 pr-2 font-semibold">Shift</th>
+                      <th className="pb-2 pr-2 font-semibold">POS (GHS)</th>
+                      <th className="pb-2 pr-2 font-semibold">On Hand (GHS)</th>
+                      <th className="pb-2 font-semibold">Difference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(cashReconciliation[currentBranch] || []).map((entry, i) => {
+                      const diff = getCashDiff(entry.pos, entry.onHand);
+                      const flagged = isCashFlagged(diff);
+                      return (
+                        <tr key={i} className={`border-b border-slate-100 ${flagged ? "bg-red-50" : ""}`}>
+                          <td className="py-2 pr-2 text-slate-600 text-xs font-medium whitespace-nowrap">
+                            {fmtDay(entry.date)}
+                          </td>
+                          <td className="py-2 pr-2">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${entry.shift === "Morning" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>
+                              {entry.shift}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-2">
+                            <input type="number" placeholder="0.00" value={entry.pos}
+                              onChange={e => {
+                                const updated = [...(cashReconciliation[currentBranch] || [])];
+                                updated[i] = { ...updated[i], pos: e.target.value };
+                                setCashReconciliation(prev => ({ ...prev, [currentBranch]: updated }));
+                              }}
+                              className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                          </td>
+                          <td className="py-2 pr-2">
+                            <input type="number" placeholder="0.00" value={entry.onHand}
+                              onChange={e => {
+                                const updated = [...(cashReconciliation[currentBranch] || [])];
+                                updated[i] = { ...updated[i], onHand: e.target.value };
+                                setCashReconciliation(prev => ({ ...prev, [currentBranch]: updated }));
+                              }}
+                              className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                          </td>
+                          <td className="py-2">
+                            {diff !== null ? (
+                              <span className={`font-bold text-sm ${flagged ? "text-red-600" : "text-emerald-600"}`}>
+                                {diff > 0 ? "+" : ""}{diff.toFixed(2)}
+                                {flagged && <span className="ml-1 text-xs">⚠</span>}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">Set the visit date above to populate the last 7 days.</p>
+            )}
           </SectionCard>
 
         </div>

@@ -123,6 +123,8 @@ export interface BranchVisit {
   actionItems: { id: number; action: string; dueDate: string; responsible: string; branch: string }[];
   branchRatings: Record<string, number>;
   generalNotes: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cashReconciliation: Record<string, any[]>;
   stats: {
     overall: { passCount: number; failCount: number; complianceRate: number };
     byBranch: Record<string, { passCount: number; failCount: number; complianceRate: number }>;

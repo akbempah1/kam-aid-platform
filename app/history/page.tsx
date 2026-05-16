@@ -120,6 +120,15 @@ export default function HistoryPage() {
     }
   };
 
+  const viewBranchVisit = async (id: number) => {
+    try {
+      const report = await dataService.branchVisits.get(id);
+      generateBranchVisitPDF(report as unknown as Record<string, unknown>, false);
+    } catch {
+      alert("Failed to load report. Please try again.");
+    }
+  };
+
   const downloadWeeklyReport = async (id: number) => {
     setDownloadingKey(`weekly-${id}`);
     try {
@@ -331,6 +340,7 @@ export default function HistoryPage() {
                     (report.stats?.overall?.complianceRate || 0) >= 80 ? "emerald" :
                     (report.stats?.overall?.complianceRate || 0) >= 60 ? "amber" : "red"
                   }
+                  onView={() => viewBranchVisit(report.id)}
                   onEdit={() => router.push(`/branch-visit?edit=${report.id}`)}
                   onDelete={() => deleteReport("branch", report.id)}
                   onDownload={() => downloadBranchVisit(report.id)}
@@ -527,7 +537,7 @@ function generateMonthlyPDF(report: any) {
 
 // ─── PDF export for history ────────────────────────────────────────────────────
 
-function generateBranchVisitPDF(report: Record<string, unknown>) {
+function generateBranchVisitPDF(report: Record<string, unknown>, autoprint = true) {
   const win = window.open("", "_blank");
   if (!win) { alert("Please allow popups to download the report"); return; }
 
@@ -543,10 +553,14 @@ function generateBranchVisitPDF(report: Record<string, unknown>) {
   const actionItems = (report.actionItems as { id: number; action: string; branch: string; responsible: string; dueDate: string }[]) || [];
   const generalNotes = (report.generalNotes as string) || "";
 
+  const cashReconData = (report.cashReconciliation || {}) as Record<string, { date: string; shift: string; pos: string; onHand: string }[]>;
   const fmtDate = (s: string) => s ? new Date(s).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "";
+  const fmtDay = (iso: string) => { if (!iso) return iso; const [, m, d] = iso.split("-"); return `${d}/${m}`; };
   const rc = (r: number) => r <= 2 ? "#ef4444" : r === 3 ? "#f59e0b" : "#10b981";
   const sc = (s: number) => s >= 80 ? "#059669" : s >= 60 ? "#d97706" : "#dc2626";
   const getBScore = (b: string) => byBranch[b]?.complianceRate || 0;
+  const getReconDiff = (pos: string, oh: string) => { const p = parseFloat(pos), o = parseFloat(oh); return (!isNaN(p) && !isNaN(o) && pos !== "" && oh !== "") ? o - p : null; };
+  const isReconFlagged = (d: number | null) => d !== null && (d > 20 || d < -5);
 
   const renderBranch = (branch: string) => {
     const d = inspectionData[branch] as Record<string, unknown> | undefined;
@@ -630,6 +644,18 @@ function generateBranchVisitPDF(report: Record<string, unknown>) {
         <div class="check-row"><span class="label">Spent</span><span class="obs">GHS ${spent}</span></div>
         <div class="check-row"><span class="label">Closing</span><span class="obs">GHS ${(parseFloat(openBal) - parseFloat(spent)).toFixed(2)}</span></div>
         ${pc.notes ? `<div class="check-row"><span class="label">Notes</span><span class="obs">${pc.notes}</span></div>` : ""}` : ""}
+      ${(() => {
+        const entries = cashReconData[branch] || [];
+        const hasData = entries.some(e => e.pos || e.onHand);
+        if (!hasData) return "";
+        const rows = entries.map(e => {
+          const diff = getReconDiff(e.pos, e.onHand);
+          const flagged = isReconFlagged(diff);
+          const diffStr = diff !== null ? (diff > 0 ? "+" : "") + diff.toFixed(2) : "—";
+          return `<tr style="${flagged ? "background:#fee2e2" : ""}"><td>${fmtDay(e.date)}</td><td>${e.shift}</td><td>${e.pos || "—"}</td><td>${e.onHand || "—"}</td><td style="font-weight:700;color:${flagged ? "#dc2626" : "#059669"}">${diffStr}${flagged ? " ⚠" : ""}</td></tr>`;
+        }).join("");
+        return `<div class="cat-title">Cash Reconciliation — Last 7 Days</div><table class="inner-table"><tr><th>Date</th><th>Shift</th><th>POS (GHS)</th><th>On Hand (GHS)</th><th>Difference</th></tr>${rows}</table>`;
+      })()}
     </div>`;
   };
 
@@ -677,7 +703,7 @@ function generateBranchVisitPDF(report: Record<string, unknown>) {
 
   win.document.write(html);
   win.document.close();
-  win.onload = () => setTimeout(() => win.print(), 500);
+  if (autoprint) win.onload = () => setTimeout(() => win.print(), 500);
 }
 
 // Empty State Component
