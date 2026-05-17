@@ -4,7 +4,19 @@ import ProtectedLayout from "../components/ProtectedLayout";
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Calendar, Plus, Trash2, Save, Eye, X, Download } from "lucide-react";
-import { weeklyReports } from "@/lib/dataService";
+import { weeklyReports, WeeklyReport } from "@/lib/dataService";
+
+function Trend({ current, prev }: { current: number; prev: number | undefined }) {
+  if (!prev || prev === 0 || current === 0) return null;
+  const diff = current - prev;
+  const pct = Math.abs((diff / prev) * 100);
+  if (pct < 0.1) return null;
+  return (
+    <span className={`text-xs font-semibold mt-1 block ${diff > 0 ? "text-emerald-600" : "text-red-500"}`}>
+      {diff > 0 ? "↑" : "↓"} {pct.toFixed(1)}% vs last week
+    </span>
+  );
+}
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const BRANCHES = ["Oyarifa", "Ghana Flag", "Madina"];
@@ -51,6 +63,7 @@ function WeeklyReportContent() {
   const [newIssue, setNewIssue] = useState({ item: "", issue: "", branch: "Oyarifa" });
   const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [prevWeekReport, setPrevWeekReport] = useState<WeeklyReport | null>(null);
 
   // Load report if editing
   useEffect(() => {
@@ -67,6 +80,17 @@ function WeeklyReportContent() {
       }).catch(() => {});
     }
   }, [editId]);
+
+  // Fetch previous week's report for comparison
+  useEffect(() => {
+    if (!weekStart) { setPrevWeekReport(null); return; }
+    weeklyReports.list().then(all => {
+      const prev = all
+        .filter(r => r.weekStart.slice(0, 10) < weekStart)
+        .sort((a, b) => b.weekStart.localeCompare(a.weekStart))[0] ?? null;
+      setPrevWeekReport(prev);
+    }).catch(() => {});
+  }, [weekStart]);
 
   // Calculate totals
   const getTotalByBranch = (branch: string) => {
@@ -502,11 +526,13 @@ function WeeklyReportContent() {
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
           <p className="text-sm text-slate-500 mb-1">Total Weekly Sales</p>
           <p className="text-2xl font-bold text-slate-800">GHS {grandTotalSales.toLocaleString()}</p>
+          <Trend current={grandTotalSales} prev={prevWeekReport?.totals.grandTotalSales} />
         </div>
         {BRANCHES.map(branch => (
           <div key={branch} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
             <p className="text-sm text-slate-500 mb-1">{branch}</p>
             <p className="text-2xl font-bold text-sky-600">GHS {getTotalByBranch(branch).toLocaleString()}</p>
+            <Trend current={getTotalByBranch(branch)} prev={prevWeekReport?.totals.byBranch?.[branch]} />
           </div>
         ))}
       </div>

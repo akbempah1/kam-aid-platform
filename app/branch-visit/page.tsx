@@ -9,7 +9,31 @@ import {
   Wifi, Users, FileText, DollarSign, Settings,
   MessageSquare, ShoppingCart,
 } from "lucide-react";
-import { branchVisits } from "@/lib/dataService";
+import { branchVisits, BranchVisit } from "@/lib/dataService";
+
+function VisitTrend({ current, prev }: { current: number; prev: number | undefined }) {
+  if (prev === undefined || prev === 0 || current === 0) return null;
+  const diff = current - prev;
+  const pts = Math.abs(diff);
+  if (pts < 0.1) return null;
+  return (
+    <span className={`text-xs font-semibold mt-1 block ${diff > 0 ? "text-emerald-300" : "text-red-300"}`}>
+      {diff > 0 ? "↑" : "↓"} {pts.toFixed(1)}pts vs prev visit
+    </span>
+  );
+}
+
+function VisitTrendDark({ current, prev }: { current: number; prev: number | undefined }) {
+  if (prev === undefined || prev === 0 || current === 0) return null;
+  const diff = current - prev;
+  const pts = Math.abs(diff);
+  if (pts < 0.1) return null;
+  return (
+    <span className={`text-xs font-semibold mt-1 block ${diff > 0 ? "text-emerald-600" : "text-red-500"}`}>
+      {diff > 0 ? "↑" : "↓"} {pts.toFixed(1)}pts vs prev visit
+    </span>
+  );
+}
 
 const BRANCHES = ["Oyarifa", "Ghana Flag", "Madina"];
 
@@ -302,6 +326,7 @@ function BranchVisitContent() {
   const [showPreview, setShowPreview]   = useState(false);
   const [saving, setSaving]             = useState(false);
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [prevVisitReport, setPrevVisitReport] = useState<BranchVisit | null>(null);
   const [templateEditorBranch, setTemplateEditorBranch] = useState("Oyarifa");
   const [draftTemplate, setDraftTemplate] = useState<BranchTemplate | null>(null);
 
@@ -484,6 +509,18 @@ function BranchVisitContent() {
     setCashReconciliation(createCashRecon(visitDate));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visitDate]);
+
+  // Fetch previous visit for comparison
+  useEffect(() => {
+    if (!visitDate) { setPrevVisitReport(null); return; }
+    branchVisits.list().then(all => {
+      const matchBranch = reportType === "consolidated" ? "All Branches" : selectedBranch;
+      const prev = all
+        .filter(r => r.visitDate.slice(0, 10) < visitDate && r.branch === matchBranch)
+        .sort((a, b) => b.visitDate.localeCompare(a.visitDate))[0] ?? null;
+      setPrevVisitReport(prev);
+    }).catch(() => {});
+  }, [visitDate, selectedBranch, reportType]);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -729,6 +766,7 @@ function BranchVisitContent() {
         <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-5 text-white">
           <p className="text-sm opacity-80 mb-1">Overall Score</p>
           <p className="text-3xl font-bold">{getOverallScore().toFixed(0)}%</p>
+          <VisitTrend current={getOverallScore()} prev={prevVisitReport?.stats?.overall?.complianceRate} />
         </div>
         {reportType === "consolidated" ? BRANCHES.map(branch => {
           const score = getBranchScore(branch);
@@ -736,6 +774,7 @@ function BranchVisitContent() {
             <div key={branch} className="bg-white border border-slate-200 rounded-2xl p-5">
               <p className="text-sm text-slate-500 mb-1">{branch}</p>
               <p className={`text-2xl font-bold ${score >= 80 ? "text-emerald-600" : score >= 60 ? "text-amber-600" : "text-red-600"}`}>{score.toFixed(0)}%</p>
+              <VisitTrendDark current={score} prev={prevVisitReport?.stats?.byBranch?.[branch]?.complianceRate} />
             </div>
           );
         }) : (
