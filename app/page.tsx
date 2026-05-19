@@ -7,7 +7,7 @@ import ProtectedLayout from "./components/ProtectedLayout";
 import {
   TrendingUp, TrendingDown, Calendar, MapPin,
   LayoutDashboard, ArrowRight, Plus, AlertTriangle,
-  CheckCircle, Package, Minus
+  CheckCircle, Package, Minus, ChevronDown, ChevronUp
 } from "lucide-react";
 import {
   Chart as ChartJS, CategoryScale, LinearScale,
@@ -57,10 +57,11 @@ function KpiCard({ label, value, sub, chip, accent }: { label: string; value: st
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [monthlyReports,  setMonthlyReports]  = useState<dataService.MonthlyReport[]>([]);
-  const [weeklyReports,   setWeeklyReports]   = useState<dataService.WeeklyReport[]>([]);
-  const [branchVisits,    setBranchVisits]    = useState<dataService.BranchVisit[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [monthlyReports,    setMonthlyReports]    = useState<dataService.MonthlyReport[]>([]);
+  const [weeklyReports,     setWeeklyReports]     = useState<dataService.WeeklyReport[]>([]);
+  const [branchVisits,      setBranchVisits]      = useState<dataService.BranchVisit[]>([]);
+  const [loading,           setLoading]           = useState(true);
+  const [showExpenseTrends, setShowExpenseTrends] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -265,27 +266,7 @@ export default function DashboardPage() {
               </button>
             </div>
             {thisMonth ? (
-              <div className="space-y-2">
-                {/* Revenue / COGS / Total expenses summary row */}
-                {[
-                  { label: "Revenue",        cur: mVal(thisMonth,"sales"),    prev: mVal(prevMonth,"sales") },
-                  { label: "Purchases",      cur: mVal(thisMonth,"cogs"),     prev: mVal(prevMonth,"cogs") },
-                  { label: "Total Expenses", cur: mVal(thisMonth,"expenses"), prev: mVal(prevMonth,"expenses") },
-                  { label: "Net Profit",     cur: mVal(thisMonth,"profit"),   prev: mVal(prevMonth,"profit") },
-                ].map(row => (
-                  <div key={row.label} className="flex items-center gap-3 py-2 border-b border-slate-50">
-                    <span className="w-28 text-sm font-semibold text-slate-700">{row.label}</span>
-                    <span className="w-36 text-sm text-slate-800">GHS {row.cur.toLocaleString()}</span>
-                    {prevMonth ? (
-                      <>
-                        <span className="w-36 text-sm text-slate-400">GHS {row.prev.toLocaleString()}</span>
-                        <ChangeChip current={row.cur} prev={row.prev} />
-                      </>
-                    ) : <span className="text-xs text-slate-300">No prior month</span>}
-                  </div>
-                ))}
-                {/* Individual expense categories */}
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider pt-3 pb-1">Expense categories</p>
+              <div className="space-y-1">
                 {expenseKeys.map(({ key, label }) => {
                   const cur  = parseFloat(thisMonth.expenses?.[key] ?? "0") || 0;
                   const prev = parseFloat(prevMonth?.expenses?.[key] ?? "0") || 0;
@@ -375,61 +356,73 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Expense Trends ── */}
+        {/* ── Expense Trends (collapsible) ── */}
         {sortedMonthly.length > 0 && (
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-base font-semibold text-slate-800">Expense Trends</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Monthly breakdown by category — last {Math.min(6, sortedMonthly.length)} months</p>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <button
+              onClick={() => setShowExpenseTrends(v => !v)}
+              className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div>
+                  <p className="text-base font-semibold text-slate-800 text-left">Expense Trends</p>
+                  <p className="text-xs text-slate-400 mt-0.5 text-left">Monthly breakdown by category — last {Math.min(6, sortedMonthly.length)} months</p>
+                </div>
               </div>
-              <button onClick={() => router.push("/history")} className="text-xs text-sky-500 hover:text-sky-600 flex items-center gap-1">
-                Full history <ArrowRight className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider pb-3 pr-6 w-36">Category</th>
-                    {sortedMonthly.slice(-6).map(r => (
-                      <th key={r.id} className="text-right text-xs font-semibold text-slate-500 pb-3 px-4 whitespace-nowrap">
-                        {MONTHS[r.month].slice(0, 3)} {r.year}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {expenseKeys.map(({ key, label }) => (
-                    <tr key={key} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-2.5 pr-6 text-sm text-slate-600 font-medium whitespace-nowrap">{label}</td>
-                      {sortedMonthly.slice(-6).map((r, i, arr) => {
-                        const val = parseFloat(r.expenses?.[key] ?? "0") || 0;
-                        const prev = i > 0 ? arr[i - 1] : null;
-                        const prevVal = prev ? parseFloat(prev.expenses?.[key] ?? "0") || 0 : 0;
-                        const pctChange = prev && prevVal > 0 ? (val - prevVal) / prevVal : null;
-                        const notable = pctChange !== null && Math.abs(pctChange) > 0.1;
-                        return (
-                          <td key={r.id} className={`py-2.5 px-4 text-right text-sm whitespace-nowrap ${notable ? (pctChange! > 0 ? "text-red-600 font-semibold" : "text-emerald-600 font-semibold") : "text-slate-800"}`}>
-                            {val > 0 ? `GHS ${val.toLocaleString()}` : <span className="text-slate-300">—</span>}
-                          </td>
-                        );
-                      })}
+              <div className="flex items-center gap-3">
+                <span onClick={e => { e.stopPropagation(); router.push("/history"); }} className="text-xs text-sky-500 hover:text-sky-600 flex items-center gap-1">
+                  Full history <ArrowRight className="w-3 h-3" />
+                </span>
+                {showExpenseTrends
+                  ? <ChevronUp className="w-4 h-4 text-slate-400" />
+                  : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              </div>
+            </button>
+            {showExpenseTrends && (
+              <div className="border-t border-slate-100 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50">
+                      <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider py-3 px-6 w-36">Category</th>
+                      {sortedMonthly.slice(-6).map(r => (
+                        <th key={r.id} className="text-right text-xs font-semibold text-slate-500 py-3 px-4 whitespace-nowrap">
+                          {MONTHS[r.month].slice(0, 3)} {r.year}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-slate-200">
-                    <td className="py-3 pr-6 text-sm font-bold text-slate-800">Total Expenses</td>
-                    {sortedMonthly.slice(-6).map(r => (
-                      <td key={r.id} className="py-3 px-4 text-right text-sm font-bold text-slate-800 whitespace-nowrap">
-                        GHS {(r.totals?.totalExpenses ?? 0).toLocaleString()}
-                      </td>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {expenseKeys.map(({ key, label }) => (
+                      <tr key={key} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-2.5 px-6 text-sm text-slate-600 font-medium whitespace-nowrap">{label}</td>
+                        {sortedMonthly.slice(-6).map((r, i, arr) => {
+                          const val = parseFloat(r.expenses?.[key] ?? "0") || 0;
+                          const prev = i > 0 ? arr[i - 1] : null;
+                          const prevVal = prev ? parseFloat(prev.expenses?.[key] ?? "0") || 0 : 0;
+                          const pctChange = prev && prevVal > 0 ? (val - prevVal) / prevVal : null;
+                          const notable = pctChange !== null && Math.abs(pctChange) > 0.1;
+                          return (
+                            <td key={r.id} className={`py-2.5 px-4 text-right text-sm whitespace-nowrap ${notable ? (pctChange! > 0 ? "text-red-600 font-semibold" : "text-emerald-600 font-semibold") : "text-slate-800"}`}>
+                              {val > 0 ? `GHS ${val.toLocaleString()}` : <span className="text-slate-300">—</span>}
+                            </td>
+                          );
+                        })}
+                      </tr>
                     ))}
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-200 bg-slate-50">
+                      <td className="py-3 px-6 text-sm font-bold text-slate-800">Total Expenses</td>
+                      {sortedMonthly.slice(-6).map(r => (
+                        <td key={r.id} className="py-3 px-4 text-right text-sm font-bold text-slate-800 whitespace-nowrap">
+                          GHS {(r.totals?.totalExpenses ?? 0).toLocaleString()}
+                        </td>
+                      ))}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
