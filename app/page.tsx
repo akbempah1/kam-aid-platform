@@ -223,28 +223,28 @@ export default function DashboardPage() {
         {/* ── Row 1: Top KPIs ── */}
         <div className="grid grid-cols-4 gap-4">
           <KpiCard
-            label="Revenue — this month"
+            label={thisMonth ? `Revenue — ${MONTHS[thisMonth.month]} ${thisMonth.year}` : "Revenue"}
             value={thisMonth ? `GHS ${mVal(thisMonth,"sales").toLocaleString()}` : "—"}
             chip={thisMonth && prevMonth ? <ChangeChip current={mVal(thisMonth,"sales")} prev={mVal(prevMonth,"sales")} /> : undefined}
-            sub={prevMonth ? `Last: GHS ${mVal(prevMonth,"sales").toLocaleString()}` : undefined}
+            sub={prevMonth ? `${MONTHS[prevMonth.month]}: GHS ${mVal(prevMonth,"sales").toLocaleString()}` : undefined}
           />
           <KpiCard
-            label="Purchases (COGS) — this month"
+            label={thisMonth ? `Purchases (COGS) — ${MONTHS[thisMonth.month]} ${thisMonth.year}` : "Purchases (COGS)"}
             value={thisMonth ? `GHS ${mVal(thisMonth,"cogs").toLocaleString()}` : "—"}
             chip={thisMonth && prevMonth ? <ChangeChip current={mVal(thisMonth,"cogs")} prev={mVal(prevMonth,"cogs")} /> : undefined}
-            sub={prevMonth ? `Last: GHS ${mVal(prevMonth,"cogs").toLocaleString()}` : undefined}
+            sub={prevMonth ? `${MONTHS[prevMonth.month]}: GHS ${mVal(prevMonth,"cogs").toLocaleString()}` : undefined}
           />
           <KpiCard
-            label="Total Expenses — this month"
+            label={thisMonth ? `Total Expenses — ${MONTHS[thisMonth.month]} ${thisMonth.year}` : "Total Expenses"}
             value={thisMonth ? `GHS ${mVal(thisMonth,"expenses").toLocaleString()}` : "—"}
             chip={thisMonth && prevMonth ? <ChangeChip current={mVal(thisMonth,"expenses")} prev={mVal(prevMonth,"expenses")} /> : undefined}
-            sub={prevMonth ? `Last: GHS ${mVal(prevMonth,"expenses").toLocaleString()}` : undefined}
+            sub={prevMonth ? `${MONTHS[prevMonth.month]}: GHS ${mVal(prevMonth,"expenses").toLocaleString()}` : undefined}
           />
           <KpiCard
-            label="Net Profit — this month"
+            label={thisMonth ? `Net Profit — ${MONTHS[thisMonth.month]} ${thisMonth.year}` : "Net Profit"}
             value={thisMonth ? `GHS ${mVal(thisMonth,"profit").toLocaleString()}` : "—"}
             chip={thisMonth && prevMonth ? <ChangeChip current={mVal(thisMonth,"profit")} prev={mVal(prevMonth,"profit")} /> : undefined}
-            sub={prevMonth ? `Last: GHS ${mVal(prevMonth,"profit").toLocaleString()}` : undefined}
+            sub={prevMonth ? `${MONTHS[prevMonth.month]}: GHS ${mVal(prevMonth,"profit").toLocaleString()}` : undefined}
           />
         </div>
 
@@ -374,6 +374,64 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {/* ── Expense Trends ── */}
+        {sortedMonthly.length > 0 && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-800">Expense Trends</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Monthly breakdown by category — last {Math.min(6, sortedMonthly.length)} months</p>
+              </div>
+              <button onClick={() => router.push("/history")} className="text-xs text-sky-500 hover:text-sky-600 flex items-center gap-1">
+                Full history <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider pb-3 pr-6 w-36">Category</th>
+                    {sortedMonthly.slice(-6).map(r => (
+                      <th key={r.id} className="text-right text-xs font-semibold text-slate-500 pb-3 px-4 whitespace-nowrap">
+                        {MONTHS[r.month].slice(0, 3)} {r.year}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {expenseKeys.map(({ key, label }) => (
+                    <tr key={key} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-2.5 pr-6 text-sm text-slate-600 font-medium whitespace-nowrap">{label}</td>
+                      {sortedMonthly.slice(-6).map((r, i, arr) => {
+                        const val = parseFloat(r.expenses?.[key] ?? "0") || 0;
+                        const prev = i > 0 ? arr[i - 1] : null;
+                        const prevVal = prev ? parseFloat(prev.expenses?.[key] ?? "0") || 0 : 0;
+                        const pctChange = prev && prevVal > 0 ? (val - prevVal) / prevVal : null;
+                        const notable = pctChange !== null && Math.abs(pctChange) > 0.1;
+                        return (
+                          <td key={r.id} className={`py-2.5 px-4 text-right text-sm whitespace-nowrap ${notable ? (pctChange! > 0 ? "text-red-600 font-semibold" : "text-emerald-600 font-semibold") : "text-slate-800"}`}>
+                            {val > 0 ? `GHS ${val.toLocaleString()}` : <span className="text-slate-300">—</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-200">
+                    <td className="py-3 pr-6 text-sm font-bold text-slate-800">Total Expenses</td>
+                    {sortedMonthly.slice(-6).map(r => (
+                      <td key={r.id} className="py-3 px-4 text-right text-sm font-bold text-slate-800 whitespace-nowrap">
+                        GHS {(r.totals?.totalExpenses ?? 0).toLocaleString()}
+                      </td>
+                    ))}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* ── Row 3: Week on week chart + best/worst + open issues ── */}
         <div className="grid grid-cols-3 gap-6">

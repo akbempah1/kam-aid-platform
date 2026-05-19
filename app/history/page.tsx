@@ -3,7 +3,7 @@ import ProtectedLayout from "../components/ProtectedLayout";
 import ReportViewModal from "../components/ReportViewModal";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, Pencil, Calendar, LayoutDashboard, MapPin, Package, Download, Eye } from "lucide-react";
+import { Trash2, Pencil, Calendar, LayoutDashboard, MapPin, Package, Download, Eye, TrendingUp } from "lucide-react";
 import * as dataService from "@/lib/dataService";
 
 const MONTHS = [
@@ -15,7 +15,11 @@ type MonthlyReport = {
   id: number;
   month: number;
   year: number;
-  totals: { totalSales: number; netProfit: number };
+  expenses?: {
+    salaries: string; rent: string; electricity: string;
+    phone: string; pettyCash: string; maintenance: string; miscellaneous: string;
+  };
+  totals: { totalSales: number; netProfit: number; totalExpenses?: number };
   createdAt: string;
 };
 
@@ -51,7 +55,7 @@ export default function HistoryPage() {
   const [weeklyReports, setWeeklyReports] = useState<WeeklyReport[]>([]);
   const [branchVisits, setBranchVisits] = useState<BranchVisitReport[]>([]);
   const [shortagesReports, setShortagesReports] = useState<ShortagesReport[]>([]);
-  const [activeTab, setActiveTab] = useState<"monthly" | "weekly" | "branch" | "shortages">("monthly");
+  const [activeTab, setActiveTab] = useState<"monthly" | "weekly" | "branch" | "shortages" | "expenses">("monthly");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
@@ -187,6 +191,7 @@ export default function HistoryPage() {
     { id: "weekly", label: "Weekly", icon: Calendar, count: weeklyReports.length, color: "violet" },
     { id: "branch", label: "Branch Visits", icon: MapPin, count: branchVisits.length, color: "emerald" },
     { id: "shortages", label: "Shortages", icon: Package, count: shortagesReports.length, color: "amber" },
+    { id: "expenses", label: "Expense Trends", icon: TrendingUp, count: monthlyReports.length, color: "rose" },
   ];
 
   if (loading) return (
@@ -238,9 +243,9 @@ export default function HistoryPage() {
                   : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
               }`}
               style={isActive ? {
-                backgroundColor: tab.color === "sky" ? "#f0f9ff" : tab.color === "violet" ? "#f5f3ff" : tab.color === "emerald" ? "#ecfdf5" : "#fffbeb",
-                color: tab.color === "sky" ? "#0284c7" : tab.color === "violet" ? "#7c3aed" : tab.color === "emerald" ? "#059669" : "#d97706",
-                borderColor: tab.color === "sky" ? "#bae6fd" : tab.color === "violet" ? "#ddd6fe" : tab.color === "emerald" ? "#a7f3d0" : "#fde68a"
+                backgroundColor: tab.color === "sky" ? "#f0f9ff" : tab.color === "violet" ? "#f5f3ff" : tab.color === "emerald" ? "#ecfdf5" : tab.color === "rose" ? "#fff1f2" : "#fffbeb",
+                color: tab.color === "sky" ? "#0284c7" : tab.color === "violet" ? "#7c3aed" : tab.color === "emerald" ? "#059669" : tab.color === "rose" ? "#e11d48" : "#d97706",
+                borderColor: tab.color === "sky" ? "#bae6fd" : tab.color === "violet" ? "#ddd6fe" : tab.color === "emerald" ? "#a7f3d0" : tab.color === "rose" ? "#fecdd3" : "#fde68a"
               } : {}}
             >
               <Icon className="w-4 h-4" />
@@ -249,8 +254,8 @@ export default function HistoryPage() {
                 <span 
                   className="text-xs font-semibold px-2 py-0.5 rounded-full"
                   style={{
-                    backgroundColor: tab.color === "sky" ? "#e0f2fe" : tab.color === "violet" ? "#ede9fe" : tab.color === "emerald" ? "#d1fae5" : "#fef3c7",
-                    color: tab.color === "sky" ? "#0369a1" : tab.color === "violet" ? "#6d28d9" : tab.color === "emerald" ? "#047857" : "#b45309"
+                    backgroundColor: tab.color === "sky" ? "#e0f2fe" : tab.color === "violet" ? "#ede9fe" : tab.color === "emerald" ? "#d1fae5" : tab.color === "rose" ? "#ffe4e6" : "#fef3c7",
+                    color: tab.color === "sky" ? "#0369a1" : tab.color === "violet" ? "#6d28d9" : tab.color === "emerald" ? "#047857" : tab.color === "rose" ? "#be123c" : "#b45309"
                   }}
                 >
                   {tab.count}
@@ -377,6 +382,76 @@ export default function HistoryPage() {
           )}
         </>
       )}
+      {/* Expense Trends */}
+      {activeTab === "expenses" && (() => {
+        const sorted = [...monthlyReports].sort((a, b) =>
+          a.year !== b.year ? a.year - b.year : a.month - b.month
+        );
+        const expenseKeys: { key: keyof NonNullable<MonthlyReport["expenses"]>; label: string }[] = [
+          { key: "electricity",   label: "Electricity" },
+          { key: "phone",         label: "Data / Internet" },
+          { key: "pettyCash",     label: "Petty Cash" },
+          { key: "salaries",      label: "Salaries" },
+          { key: "rent",          label: "Rent" },
+          { key: "maintenance",   label: "Maintenance" },
+          { key: "miscellaneous", label: "Miscellaneous" },
+        ];
+        if (sorted.length === 0) return (
+          <EmptyState icon="📊" title="No Expense Data" subtitle="Save at least one monthly report to see expense trends." />
+        );
+        return (
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-6 pt-5 pb-4 border-b border-slate-100">
+              <h2 className="text-base font-semibold text-slate-800">Expense Trends by Month</h2>
+              <p className="text-xs text-slate-400 mt-0.5">All months — red means increased &gt;10%, green means decreased &gt;10%</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50">
+                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider py-3 px-6 whitespace-nowrap w-40">Category</th>
+                    {sorted.map(r => (
+                      <th key={r.id} className="text-right text-xs font-semibold text-slate-500 py-3 px-4 whitespace-nowrap">
+                        {MONTHS[r.month].slice(0, 3)} {r.year}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {expenseKeys.map(({ key, label }) => (
+                    <tr key={key} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-3 px-6 text-sm font-medium text-slate-700 whitespace-nowrap">{label}</td>
+                      {sorted.map((r, i, arr) => {
+                        const val = parseFloat(r.expenses?.[key] ?? "0") || 0;
+                        const prev = i > 0 ? arr[i - 1] : null;
+                        const prevVal = prev ? parseFloat(prev.expenses?.[key] ?? "0") || 0 : 0;
+                        const pctChange = prev && prevVal > 0 ? (val - prevVal) / prevVal : null;
+                        const notable = pctChange !== null && Math.abs(pctChange) > 0.1;
+                        return (
+                          <td key={r.id} className={`py-3 px-4 text-right text-sm whitespace-nowrap ${notable ? (pctChange! > 0 ? "text-red-600 font-semibold" : "text-emerald-600 font-semibold") : "text-slate-800"}`}>
+                            {val > 0 ? `GHS ${val.toLocaleString()}` : <span className="text-slate-300">—</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-200 bg-slate-50">
+                    <td className="py-3 px-6 text-sm font-bold text-slate-800">Total Expenses</td>
+                    {sorted.map(r => (
+                      <td key={r.id} className="py-3 px-4 text-right text-sm font-bold text-slate-800 whitespace-nowrap">
+                        GHS {(r.totals?.totalExpenses ?? 0).toLocaleString()}
+                      </td>
+                    ))}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
     <ReportViewModal
       isOpen={viewModal.isOpen}
