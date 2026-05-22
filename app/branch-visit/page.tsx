@@ -332,6 +332,7 @@ function BranchVisitContent() {
   const [templateEditorBranch, setTemplateEditorBranch] = useState("Oyarifa");
   const [draftTemplate, setDraftTemplate] = useState<BranchTemplate | null>(null);
   const [loadingNearExpiry, setLoadingNearExpiry] = useState<Record<string, boolean>>({});
+  const [loadingExpiredDrugs, setLoadingExpiredDrugs] = useState<Record<string, boolean>>({});
 
   const activeBranches = reportType === "single" ? [selectedBranch] : BRANCHES;
   const currentBranch  = reportType === "single" ? selectedBranch : activeBranchTab;
@@ -344,6 +345,43 @@ function BranchVisitContent() {
   const upd = (fn: (p: BranchInspection) => BranchInspection) => updateBranch(currentBranch, fn);
 
   // ── Load near-expiry from last visit ────────────────────────────────────────
+
+  const loadExpiredDrugsFromLastVisit = async (branch: string) => {
+    setLoadingExpiredDrugs(prev => ({ ...prev, [branch]: true }));
+    try {
+      const allVisits = await branchVisits.list();
+      const relevant = allVisits
+        .filter(v => {
+          if (reportId && v.id === reportId) return false;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const checklist = v.branchChecklist as Record<string, any>;
+          return checklist?.[branch]?.shelvesProducts?.expiredDrugs?.length > 0;
+        })
+        .sort((a, b) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime());
+      if (relevant.length === 0) {
+        alert(`No previous visit with expired drugs found for ${branch}.`);
+        return;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const prevItems = (relevant[0].branchChecklist as Record<string, any>)[branch].shelvesProducts.expiredDrugs as ExpiredDrug[];
+      const newItems = prevItems.map(item => ({ ...item, id: Date.now() + Math.floor(Math.random() * 100000) }));
+      setInspectionData(prev => ({
+        ...prev,
+        [branch]: {
+          ...prev[branch],
+          shelvesProducts: {
+            ...prev[branch].shelvesProducts,
+            expiredDrugsFound: { value: true, notes: "" },
+            expiredDrugs: newItems,
+          }
+        }
+      }));
+    } catch {
+      alert("Failed to load previous visit data. Please try again.");
+    } finally {
+      setLoadingExpiredDrugs(prev => ({ ...prev, [branch]: false }));
+    }
+  };
 
   const loadNearExpiryFromLastVisit = async (branch: string) => {
     setLoadingNearExpiry(prev => ({ ...prev, [branch]: true }));
@@ -974,9 +1012,18 @@ function BranchVisitContent() {
                 <div className="ml-4 p-4 bg-red-50 border border-red-200 rounded-xl">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-semibold text-red-700">Record expired drugs</p>
-                    <button type="button"
-                      onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: [...p.shelvesProducts.expiredDrugs, { id: Date.now(), drugName: "", expiryDate: "", quantity: "", shelfLocation: "" }] } }))}
-                      className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 font-medium"><Plus className="w-4 h-4" /> Add drug</button>
+                    <div className="flex items-center gap-2">
+                      <button type="button"
+                        onClick={() => loadExpiredDrugsFromLastVisit(currentBranch)}
+                        disabled={loadingExpiredDrugs[currentBranch]}
+                        className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-700 font-medium border border-slate-200 hover:border-red-300 rounded-lg px-2 py-1 bg-white disabled:opacity-50">
+                        <History className="w-4 h-4" />
+                        {loadingExpiredDrugs[currentBranch] ? "Loading..." : "Load from last visit"}
+                      </button>
+                      <button type="button"
+                        onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: [...p.shelvesProducts.expiredDrugs, { id: Date.now(), drugName: "", expiryDate: "", quantity: "", shelfLocation: "" }] } }))}
+                        className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 font-medium"><Plus className="w-4 h-4" /> Add drug</button>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     {d.shelvesProducts.expiredDrugs.map((drug, idx) => (
