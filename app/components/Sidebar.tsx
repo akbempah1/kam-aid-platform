@@ -21,7 +21,7 @@ const navItems = [
   { href: "/settings",     label: "Settings",          icon: Settings,        section: "DATA" },
 ];
 
-export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+export default function Sidebar({ collapsed, onToggle, onLinkClick }: { collapsed: boolean; onToggle: () => void; onLinkClick?: () => void }) {
   const pathname = usePathname();
   const { data: session } = useSession();
 
@@ -74,6 +74,7 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={onLinkClick}
                     title={collapsed ? item.label : undefined}
                     className={`flex items-center py-3 rounded-xl transition-all ${
                       collapsed ? "justify-center px-2" : "gap-3 px-4"

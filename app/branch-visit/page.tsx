@@ -7,7 +7,7 @@ import {
   MapPin, Plus, Trash2, Save, Eye, X, Download,
   Building2, AlertTriangle, Shield, Package,
   Wifi, Users, FileText, DollarSign, Settings,
-  MessageSquare, ShoppingCart,
+  MessageSquare, ShoppingCart, History,
 } from "lucide-react";
 import { branchVisits, BranchVisit } from "@/lib/dataService";
 
@@ -49,7 +49,7 @@ type ShelfEntry     = { id: number; workerName: string; shelfArea: string; shelf
 type StaffEntry     = { id: number; name: string; present: boolean | null; inLabCoat: boolean | null };
 type ActionItem     = { id: number; action: string; dueDate: string; responsible: string; branch: string };
 type AutoIssue      = { id: number; description: string; priority: "high" | "medium"; branch: string; assignedTo: string };
-type CashShiftEntry = { date: string; shift: "Morning" | "Afternoon"; pos: string; onHand: string };
+type CashShiftEntry = { date: string; shift: "Morning" | "Afternoon"; pos: string; onHand: string; cashUsed: string };
 type CashReconciliation = Record<string, CashShiftEntry[]>;
 
 type BranchInspection = {
@@ -102,17 +102,19 @@ function createCashRecon(visitDate: string): CashReconciliation {
   const recon: CashReconciliation = {};
   BRANCHES.forEach(branch => {
     recon[branch] = days.flatMap(date => ([
-      { date, shift: "Morning" as const,   pos: "", onHand: "" },
-      { date, shift: "Afternoon" as const, pos: "", onHand: "" },
+      { date, shift: "Morning" as const,   pos: "", onHand: "", cashUsed: "" },
+      { date, shift: "Afternoon" as const, pos: "", onHand: "", cashUsed: "" },
     ]));
   });
   return recon;
 }
 
-function getCashDiff(pos: string, onHand: string): number | null {
+function getCashDiff(pos: string, onHand: string, cashUsed?: string): number | null {
   const p = parseFloat(pos), oh = parseFloat(onHand);
   if (isNaN(p) || isNaN(oh) || pos === "" || onHand === "") return null;
-  return oh - p;
+  const cu = cashUsed && cashUsed !== "" ? (parseFloat(cashUsed) || 0) : 0;
+  // Adjusted difference: On Hand − (POS − Cash Used for shop)
+  return oh - (p - cu);
 }
 
 function isCashFlagged(diff: number | null): boolean {
@@ -329,6 +331,7 @@ function BranchVisitContent() {
   const [prevVisitReport, setPrevVisitReport] = useState<BranchVisit | null>(null);
   const [templateEditorBranch, setTemplateEditorBranch] = useState("Oyarifa");
   const [draftTemplate, setDraftTemplate] = useState<BranchTemplate | null>(null);
+  const [loadingNearExpiry, setLoadingNearExpiry] = useState<Record<string, boolean>>({});
 
   const activeBranches = reportType === "single" ? [selectedBranch] : BRANCHES;
   const currentBranch  = reportType === "single" ? selectedBranch : activeBranchTab;
@@ -339,6 +342,45 @@ function BranchVisitContent() {
     setInspectionData(prev => ({ ...prev, [branch]: fn(prev[branch]) }));
 
   const upd = (fn: (p: BranchInspection) => BranchInspection) => updateBranch(currentBranch, fn);
+
+  // ── Load near-expiry from last visit ────────────────────────────────────────
+
+  const loadNearExpiryFromLastVisit = async (branch: string) => {
+    setLoadingNearExpiry(prev => ({ ...prev, [branch]: true }));
+    try {
+      const allVisits = await branchVisits.list();
+      const relevant = allVisits
+        .filter(v => {
+          if (reportId && v.id === reportId) return false;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const checklist = v.branchChecklist as Record<string, any>;
+          return checklist?.[branch]?.shelvesProducts?.nearExpiryItems?.length > 0;
+        })
+        .sort((a, b) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime());
+      if (relevant.length === 0) {
+        alert(`No previous visit with near-expiry items found for ${branch}.`);
+        return;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const prevItems = (relevant[0].branchChecklist as Record<string, any>)[branch].shelvesProducts.nearExpiryItems as NearExpiryDrug[];
+      const newItems = prevItems.map(item => ({ ...item, id: Date.now() + Math.floor(Math.random() * 100000) }));
+      setInspectionData(prev => ({
+        ...prev,
+        [branch]: {
+          ...prev[branch],
+          shelvesProducts: {
+            ...prev[branch].shelvesProducts,
+            nearExpiryFound: { value: true, notes: "" },
+            nearExpiryItems: newItems,
+          }
+        }
+      }));
+    } catch {
+      alert("Failed to load previous visit data. Please try again.");
+    } finally {
+      setLoadingNearExpiry(prev => ({ ...prev, [branch]: false }));
+    }
+  };
 
   // ── Scoring ─────────────────────────────────────────────────────────────────
 
@@ -363,6 +405,10 @@ function BranchVisitContent() {
       d.documentation.handoverBookSignedOff.value, d.security.cctvOperational.value,
       d.security.safeCashBoxSecured.value, d.adminComms.allMessagesReplied.value,
       d.adminComms.dailySalesReportSubmitted.value,
+      // Cash reconciliation — each shift with data counts: clean = true, flagged = false
+      ...(cashReconciliation[branch] || [])
+        .filter(e => e.pos !== "" && e.onHand !== "")
+        .map(e => !isCashFlagged(getCashDiff(e.pos, e.onHand, e.cashUsed))),
     ].filter(v => v !== null) as boolean[];
     const qualityScore = qualityRatings.length > 0
       ? (qualityRatings.reduce((a, b) => a + b, 0) / qualityRatings.length / 5) * 100 : 0;
@@ -425,7 +471,7 @@ function BranchVisitContent() {
         { item: d.exterior.signageWorking,                  label: "Signage not working" },
         { item: d.systems.posOperational,                   label: "POS not operational" },
         { item: d.systems.internetConnectivity,             label: "No internet connectivity" },
-        { item: d.systems.devicesCharged,                   label: "Mobile devices not charged" },
+        { item: d.systems.devicesCharged,                   label: "Mobile devices not charged (>50%)" },
         { item: d.systems.airtimeAvailable,                 label: "No airtime/call credit" },
         { item: d.utilities.acWorking,                      label: "AC not working" },
         { item: d.utilities.lightBulbsFunctional,           label: "Light bulbs not all functional" },
@@ -438,15 +484,16 @@ function BranchVisitContent() {
         if (item.value === false)
           issues.push({ id: id++, description: `${label}${item.notes ? ` — ${item.notes}` : ""}`, priority: "medium", branch, assignedTo: "" });
       });
-      // Customer complaints
-      if (d.adminComms.customerComplaints.value === true)
+      // Customer complaints — field is "No customer complaints", so value===false means there WERE complaints
+      if (d.adminComms.customerComplaints.value === false)
         issues.push({ id: id++, description: `Customer complaints reported${d.adminComms.customerComplaints.notes ? ` — ${d.adminComms.customerComplaints.notes}` : ""}`, priority: "medium", branch, assignedTo: "" });
       // Cash reconciliation — flagged shifts
       (cashReconciliation[branch] || []).forEach(entry => {
-        const diff = getCashDiff(entry.pos, entry.onHand);
+        const diff = getCashDiff(entry.pos, entry.onHand, entry.cashUsed);
         if (isCashFlagged(diff)) {
           const sign = diff! > 0 ? "+" : "";
-          issues.push({ id: id++, description: `Cash difference: ${entry.shift} shift on ${fmtDay(entry.date)} — GHS ${sign}${diff!.toFixed(2)} (POS: ${entry.pos}, On Hand: ${entry.onHand})`, priority: Math.abs(diff!) > 50 ? "high" : "medium", branch, assignedTo: "" });
+          const usedNote = entry.cashUsed && entry.cashUsed !== "" ? `, Cash Used: ${entry.cashUsed}` : "";
+          issues.push({ id: id++, description: `Cash difference: ${entry.shift} shift on ${fmtDay(entry.date)} — GHS ${sign}${diff!.toFixed(2)} (POS: ${entry.pos}, On Hand: ${entry.onHand}${usedNote})`, priority: Math.abs(diff!) > 50 ? "high" : "medium", branch, assignedTo: "" });
         }
       });
     });
@@ -625,7 +672,7 @@ function BranchVisitContent() {
           ${b("POS/PC operational", d.systems.posOperational)}
           ${b("No pending transfers (LavaBMS)", d.systems.noPendingTransfers)}
           ${b("Internet connectivity", d.systems.internetConnectivity)}
-          ${b("Mobile devices charged", d.systems.devicesCharged)}
+          ${b("Mobile devices charged (>50%)", d.systems.devicesCharged)}
           ${b("Airtime/call credit", d.systems.airtimeAvailable)}
           <div class="cat-title">Personnel</div>
           ${d.personnel.staffEntries.length > 0 ? `
@@ -642,7 +689,7 @@ function BranchVisitContent() {
           <div class="cat-title">Admin & Communication</div>
           ${b("All messages replied", d.adminComms.allMessagesReplied)}
           ${b("Daily sales report submitted", d.adminComms.dailySalesReportSubmitted)}
-          ${b("Customer complaints", d.adminComms.customerComplaints)}
+          ${b("No customer complaints since last visit", d.adminComms.customerComplaints)}
           ${(d.pettyCash.openingBalance || d.pettyCash.amountSpent) ? `
             <div class="cat-title">Petty Cash</div>
             <div class="check-row"><span class="label">Opening</span><span class="obs">GHS ${d.pettyCash.openingBalance || "0"}</span></div>
@@ -655,12 +702,13 @@ function BranchVisitContent() {
             const hasData = entries.some(e => e.pos || e.onHand);
             if (!hasData) return "";
             const rows = entries.map(e => {
-              const diff = getCashDiff(e.pos, e.onHand);
+              const diff = getCashDiff(e.pos, e.onHand, e.cashUsed);
               const flagged = isCashFlagged(diff);
               const diffStr = diff !== null ? (diff > 0 ? "+" : "") + diff.toFixed(2) : "—";
-              return `<tr style="${flagged ? "background:#fee2e2" : ""}"><td>${fmtDay(e.date)}</td><td>${e.shift}</td><td>${e.pos || "—"}</td><td>${e.onHand || "—"}</td><td style="font-weight:700;color:${flagged ? "#dc2626" : "#059669"}">${diffStr}${flagged ? " ⚠" : ""}</td></tr>`;
+              const cashUsedCell = e.cashUsed && e.cashUsed !== "" ? e.cashUsed : "—";
+              return `<tr style="${flagged ? "background:#fee2e2" : ""}"><td>${fmtDay(e.date)}</td><td>${e.shift}</td><td>${e.pos || "—"}</td><td>${e.onHand || "—"}</td><td>${cashUsedCell}</td><td style="font-weight:700;color:${flagged ? "#dc2626" : "#059669"}">${diffStr}${flagged ? " ⚠" : ""}</td></tr>`;
             }).join("");
-            return `<div class="cat-title">Cash Reconciliation — Last 7 Days</div><table class="inner-table"><tr><th>Date</th><th>Shift</th><th>POS (GHS)</th><th>On Hand (GHS)</th><th>Difference</th></tr>${rows}</table>`;
+            return `<div class="cat-title">Cash Reconciliation — Last 7 Days</div><table class="inner-table"><tr><th>Date</th><th>Shift</th><th>POS (GHS)</th><th>On Hand (GHS)</th><th>Cash Used (GHS)</th><th>Difference</th></tr>${rows}</table>`;
           })()}
         </div>`;
     };
@@ -730,7 +778,7 @@ function BranchVisitContent() {
     <ProtectedLayout>
     <div>
       {/* Header */}
-      <div className="mb-8 flex justify-between items-start">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-2">{reportId ? "Edit Branch Visit" : "Branch Visit Report"}</h1>
           <p className="text-slate-500">{reportId ? `Editing ${reportType} visit report` : "Structured inspection across 11 areas"}</p>
@@ -762,7 +810,7 @@ function BranchVisitContent() {
       </div>
 
       {/* Score Cards */}
-      <div className={`grid gap-4 mb-6 ${reportType === "consolidated" ? "grid-cols-4" : "grid-cols-2"}`}>
+      <div className={`grid gap-4 mb-6 grid-cols-2 ${reportType === "consolidated" ? "lg:grid-cols-4" : ""}`}>
         <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-5 text-white">
           <p className="text-sm opacity-80 mb-1">Overall Score</p>
           <p className="text-3xl font-bold">{getOverallScore().toFixed(0)}%</p>
@@ -790,7 +838,7 @@ function BranchVisitContent() {
         <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
           <MapPin className="w-5 h-5 text-emerald-500" /> Visit Information
         </h2>
-        <div className={`grid gap-4 ${reportType === "single" ? "grid-cols-3" : "grid-cols-2"}`}>
+        <div className={`grid gap-4 grid-cols-1 sm:grid-cols-2 ${reportType === "single" ? "lg:grid-cols-3" : ""}`}>
           {reportType === "single" && (
             <div>
               <label className="block text-sm font-medium text-slate-600 mb-2">Branch</label>
@@ -932,7 +980,7 @@ function BranchVisitContent() {
                   </div>
                   <div className="space-y-2">
                     {d.shelvesProducts.expiredDrugs.map((drug, idx) => (
-                      <div key={drug.id} className="bg-white border border-red-100 rounded-lg p-3 grid grid-cols-4 gap-2">
+                      <div key={drug.id} className="bg-white border border-red-100 rounded-lg p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <input type="text" placeholder="Drug name" value={drug.drugName}
                           onChange={e => upd(p => { const dr = [...p.shelvesProducts.expiredDrugs]; dr[idx] = { ...dr[idx], drugName: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, expiredDrugs: dr } }; })}
                           className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300" />
@@ -963,13 +1011,22 @@ function BranchVisitContent() {
                 <div className="ml-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-semibold text-amber-700">Record near-expiry items</p>
-                    <button type="button"
-                      onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: [...p.shelvesProducts.nearExpiryItems, { id: Date.now(), drugName: "", expiryDate: "", quantity: "", stickerApplied: null }] } }))}
-                      className="flex items-center gap-1 text-sm text-amber-600 hover:text-amber-700 font-medium"><Plus className="w-4 h-4" /> Add item</button>
+                    <div className="flex items-center gap-2">
+                      <button type="button"
+                        onClick={() => loadNearExpiryFromLastVisit(currentBranch)}
+                        disabled={loadingNearExpiry[currentBranch]}
+                        className="flex items-center gap-1 text-sm text-slate-500 hover:text-amber-700 font-medium border border-slate-200 hover:border-amber-300 rounded-lg px-2 py-1 bg-white disabled:opacity-50">
+                        <History className="w-4 h-4" />
+                        {loadingNearExpiry[currentBranch] ? "Loading..." : "Load from last visit"}
+                      </button>
+                      <button type="button"
+                        onClick={() => upd(p => ({ ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: [...p.shelvesProducts.nearExpiryItems, { id: Date.now(), drugName: "", expiryDate: "", quantity: "", stickerApplied: null }] } }))}
+                        className="flex items-center gap-1 text-sm text-amber-600 hover:text-amber-700 font-medium"><Plus className="w-4 h-4" /> Add item</button>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     {d.shelvesProducts.nearExpiryItems.map((item, idx) => (
-                      <div key={item.id} className="bg-white border border-amber-100 rounded-lg p-3 grid grid-cols-5 gap-2 items-center">
+                      <div key={item.id} className="bg-white border border-amber-100 rounded-lg p-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 items-center">
                         <input type="text" placeholder="Drug name" value={item.drugName}
                           onChange={e => upd(p => { const ni = [...p.shelvesProducts.nearExpiryItems]; ni[idx] = { ...ni[idx], drugName: e.target.value }; return { ...p, shelvesProducts: { ...p.shelvesProducts, nearExpiryItems: ni } }; })}
                           className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
@@ -1039,7 +1096,7 @@ function BranchVisitContent() {
                 onChange={u => upd(p => ({ ...p, systems: { ...p.systems, noPendingTransfers: { ...p.systems.noPendingTransfers, ...u } } }))} />
               <BinaryRow label="Internet connectivity" item={d.systems.internetConnectivity}
                 onChange={u => upd(p => ({ ...p, systems: { ...p.systems, internetConnectivity: { ...p.systems.internetConnectivity, ...u } } }))} />
-              <BinaryRow label="Mobile devices charged" item={d.systems.devicesCharged}
+              <BinaryRow label="Mobile devices charged (>50%)" item={d.systems.devicesCharged}
                 onChange={u => upd(p => ({ ...p, systems: { ...p.systems, devicesCharged: { ...p.systems.devicesCharged, ...u } } }))} />
               <BinaryRow label="Airtime / call credit available" item={d.systems.airtimeAvailable}
                 onChange={u => upd(p => ({ ...p, systems: { ...p.systems, airtimeAvailable: { ...p.systems.airtimeAvailable, ...u } } }))} />
@@ -1130,14 +1187,14 @@ function BranchVisitContent() {
                 onChange={u => upd(p => ({ ...p, adminComms: { ...p.adminComms, allMessagesReplied: { ...p.adminComms.allMessagesReplied, ...u } } }))} />
               <BinaryRow label="Daily sales report submitted" item={d.adminComms.dailySalesReportSubmitted}
                 onChange={u => upd(p => ({ ...p, adminComms: { ...p.adminComms, dailySalesReportSubmitted: { ...p.adminComms.dailySalesReportSubmitted, ...u } } }))} />
-              <BinaryRow label="Customer complaints since last visit" item={d.adminComms.customerComplaints}
+              <BinaryRow label="No customer complaints since last visit" item={d.adminComms.customerComplaints}
                 onChange={u => upd(p => ({ ...p, adminComms: { ...p.adminComms, customerComplaints: { ...p.adminComms.customerComplaints, ...u } } }))} />
             </div>
           </SectionCard>
 
           {/* 11. Petty Cash */}
           <SectionCard title="11. Petty Cash" icon={<DollarSign className="w-4 h-4 text-emerald-500" />}>
-            <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium text-slate-600 mb-2">Opening Balance (GHS)</label>
                 <input type="number" placeholder="0.00" value={d.pettyCash.openingBalance}
@@ -1179,12 +1236,13 @@ function BranchVisitContent() {
                       <th className="pb-2 pr-2 font-semibold">Shift</th>
                       <th className="pb-2 pr-2 font-semibold">POS (GHS)</th>
                       <th className="pb-2 pr-2 font-semibold">On Hand (GHS)</th>
+                      <th className="pb-2 pr-2 font-semibold text-blue-500">Cash Used (GHS)</th>
                       <th className="pb-2 font-semibold">Difference</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(cashReconciliation[currentBranch] || []).map((entry, i) => {
-                      const diff = getCashDiff(entry.pos, entry.onHand);
+                      const diff = getCashDiff(entry.pos, entry.onHand, entry.cashUsed);
                       const flagged = isCashFlagged(diff);
                       return (
                         <tr key={i} className={`border-b border-slate-100 ${flagged ? "bg-red-50" : ""}`}>
@@ -1213,6 +1271,15 @@ function BranchVisitContent() {
                                 setCashReconciliation(prev => ({ ...prev, [currentBranch]: updated }));
                               }}
                               className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                          </td>
+                          <td className="py-2 pr-2">
+                            <input type="number" placeholder="0.00" value={entry.cashUsed || ""}
+                              onChange={e => {
+                                const updated = [...(cashReconciliation[currentBranch] || [])];
+                                updated[i] = { ...updated[i], cashUsed: e.target.value };
+                                setCashReconciliation(prev => ({ ...prev, [currentBranch]: updated }));
+                              }}
+                              className="w-24 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
                           </td>
                           <td className="py-2">
                             {diff !== null ? (
@@ -1257,7 +1324,7 @@ function BranchVisitContent() {
             ))}
           </div>
         )}
-        <div className="grid grid-cols-5 gap-3 pt-4 border-t border-slate-100">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-4 border-t border-slate-100">
           <input type="text" placeholder="Action to take" value={newAction.action} onChange={e => setNewAction({ ...newAction, action: e.target.value })}
             className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
           <select value={newAction.branch} onChange={e => setNewAction({ ...newAction, branch: e.target.value })}
@@ -1284,10 +1351,10 @@ function BranchVisitContent() {
       </div>
 
       {/* Buttons */}
-      <div className="flex justify-between">
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
         <button onClick={clearForm} className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors">Clear Form</button>
-        <div className="flex gap-4">
-          <button onClick={() => setShowPreview(true)} className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center gap-2">
+        <div className="flex gap-3">
+          <button onClick={() => setShowPreview(true)} className="flex-1 sm:flex-none px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center justify-center gap-2">
             <Eye className="w-4 h-4" /> Preview
           </button>
           <button onClick={saveReport} disabled={saving}
@@ -1301,9 +1368,9 @@ function BranchVisitContent() {
       {showPreview && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[95vh] overflow-y-auto shadow-2xl">
-            <div className="bg-white border-b border-slate-100 px-8 py-6 flex items-center justify-between sticky top-0 z-10">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg">
+            <div className="bg-white border-b border-slate-100 px-4 py-4 sm:px-8 sm:py-6 flex items-center justify-between sticky top-0 z-10">
+              <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 shrink-0 bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg">
                   <MapPin className="w-6 h-6 text-white" />
                 </div>
                 <div>
@@ -1316,9 +1383,9 @@ function BranchVisitContent() {
               </div>
               <button onClick={() => setShowPreview(false)} className="p-3 hover:bg-slate-100 rounded-2xl transition-colors"><X className="w-5 h-5 text-slate-400" /></button>
             </div>
-            <div className="p-8 space-y-6">
+            <div className="p-4 sm:p-8 space-y-6">
               {/* Scores */}
-              <div className={`grid gap-4 ${reportType === "consolidated" ? "grid-cols-4" : "grid-cols-2"}`}>
+              <div className={`grid gap-4 grid-cols-2 ${reportType === "consolidated" ? "lg:grid-cols-4" : ""}`}>
                 <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-5 text-white text-center">
                   <p className="text-3xl font-bold">{getOverallScore().toFixed(0)}%</p>
                   <p className="text-sm opacity-80 mt-1">Overall Score</p>

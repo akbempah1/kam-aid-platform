@@ -498,7 +498,7 @@ function WeeklyReportContent() {
      <ProtectedLayout>
     <div>
       {/* Header */}
-      <div className="mb-8 flex justify-between items-start">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-2">
             {reportId ? "Edit Weekly Report" : "Weekly Operating Report"}
@@ -522,7 +522,7 @@ function WeeklyReportContent() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
           <p className="text-sm text-slate-500 mb-1">Total Weekly Sales</p>
           <p className="text-2xl font-bold text-slate-800">GHS {grandTotalSales.toLocaleString()}</p>
@@ -635,7 +635,7 @@ function WeeklyReportContent() {
 
         {/* Best / worst summary strip */}
         {grandTotalSales > 0 && (
-          <div className="mt-4 grid grid-cols-3 gap-3">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {BRANCHES.map(branch => {
               const best  = getBestDay(branch);
               const worst = getWorstDay(branch);
@@ -689,7 +689,7 @@ function WeeklyReportContent() {
           </div>
         )}
 
-        <div className="grid grid-cols-4 gap-3 pt-4 border-t border-slate-100">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-slate-100">
           <input
             type="text"
             placeholder="Expense name"
@@ -753,7 +753,7 @@ function WeeklyReportContent() {
           </div>
         )}
 
-        <div className="grid grid-cols-4 gap-3 pt-4 border-t border-slate-100">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-slate-100">
           <input
             type="text"
             placeholder="Item/Product"
@@ -789,14 +789,14 @@ function WeeklyReportContent() {
       </div>
 
       {/* Action Buttons */}
-      <div className="flex justify-between">
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
         <button
           onClick={clearForm}
           className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors"
         >
           Clear Form
         </button>
-        <div className="flex gap-4">
+        <div className="flex gap-3">
           <button 
             onClick={() => setShowPreview(true)}
             className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors flex items-center gap-2"
@@ -820,7 +820,7 @@ function WeeklyReportContent() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-5xl w-full max-h-[95vh] overflow-y-auto shadow-2xl">
             {/* Header */}
-            <div className="bg-white border-b border-slate-100 px-8 py-6 flex items-center justify-between sticky top-0 z-10">
+            <div className="bg-white border-b border-slate-100 px-4 py-4 sm:px-8 sm:py-6 flex items-center justify-between sticky top-0 z-10">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
                   <Calendar className="w-6 h-6 text-white" />
@@ -839,9 +839,9 @@ function WeeklyReportContent() {
             </div>
 
             {/* Content */}
-            <div className="p-8">
+            <div className="p-4 sm:p-8">
               {/* KPIs */}
-              <div className="grid grid-cols-4 gap-4 mb-8">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                 <div className="bg-gradient-to-br from-sky-500 to-blue-600 rounded-2xl p-6 text-white">
                   <p className="text-sm opacity-80 mb-1">Total Sales</p>
                   <p className="text-3xl font-bold">GHS {grandTotalSales.toLocaleString()}</p>
@@ -889,7 +889,7 @@ function WeeklyReportContent() {
               </div>
 
               {/* Expenses & Issues Grid */}
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {/* Expenses */}
                 <div className="bg-white border border-slate-200 rounded-2xl p-6">
                   <h3 className="text-lg font-semibold text-slate-800 mb-4">

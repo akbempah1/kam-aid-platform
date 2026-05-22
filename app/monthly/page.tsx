@@ -328,7 +328,7 @@ const handleFileData = (data: {
     <ProtectedLayout>
     <div>
       {/* Header */}
-      <div className="mb-8 flex justify-between items-start">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-2">
             {reportId ? "Edit Report" : "Monthly Financial Report"}
@@ -353,7 +353,7 @@ const handleFileData = (data: {
 {!reportId && <FileUpload onDataParsed={handleFileData} />}
 
       {/* Live Summary Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
           <p className="text-sm text-slate-500 mb-1">Total Sales</p>
           <p className="text-2xl font-bold text-slate-800">GHS {totalSales.toLocaleString()}</p>
@@ -439,7 +439,7 @@ const handleFileData = (data: {
             {loadingWeekly ? "Loading…" : "Load from weekly"}
           </button>
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-2">Oyarifa Branch</label>
             <div className="relative">
@@ -513,14 +513,14 @@ const handleFileData = (data: {
             { key: "maintenance",   label: "Maintenance & Repairs" },
             { key: "miscellaneous", label: "Miscellaneous" },
           ].map((item) => (
-            <div key={item.key} className="flex items-center gap-4">
-              <label className="w-48 text-sm font-medium text-slate-600 flex items-center gap-1.5">
+            <div key={item.key} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+              <label className="sm:w-48 sm:shrink-0 text-sm font-medium text-slate-600 flex items-center gap-1.5">
                 {item.label}
                 {autoFilledFields.has(item.key as ExpenseKey) && (
                   <span className="text-xs font-normal text-emerald-500">· from weekly</span>
                 )}
               </label>
-              <div className="relative flex-1 max-w-xs">
+              <div className="relative flex-1 sm:max-w-xs">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">GHS</span>
                 <input
                   type="number"
@@ -553,9 +553,9 @@ const handleFileData = (data: {
             </div>
           )}
           {customExpenses.map((expense) => (
-            <div key={expense.id} className="flex items-center gap-4">
-              <label className="w-48 text-sm font-medium text-slate-600">{expense.name}</label>
-              <div className="relative flex-1 max-w-xs">
+            <div key={expense.id} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+              <label className="sm:w-48 sm:shrink-0 text-sm font-medium text-slate-600">{expense.name}</label>
+              <div className="relative flex-1 sm:max-w-xs">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">GHS</span>
                 <input
                   type="number"
@@ -595,7 +595,7 @@ const handleFileData = (data: {
       </div>
 
       {/* Action Buttons */}
-      <div className="flex justify-end gap-4">
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
        <button 
   onClick={() => setShowDashboard(true)}
   className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-100 transition-colors"

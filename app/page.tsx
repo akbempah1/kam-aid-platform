@@ -200,18 +200,18 @@ export default function DashboardPage() {
       <div className="space-y-6">
 
         {/* Header + Quick Actions */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
             <p className="text-slate-500 text-sm mt-0.5">KAM AID Pharmacy — overview</p>
           </div>
-          <div className="flex gap-3">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-3">
             {quickActions.map(a => {
               const Icon = a.icon;
               const c = colorMap[a.color];
               return (
                 <button key={a.href} onClick={() => router.push(a.href)}
-                  className={`${c.bg} ${c.hover} px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all`}>
+                  className={`${c.bg} ${c.hover} px-3 py-2.5 rounded-xl flex items-center gap-2 transition-all`}>
                   <Icon className={`w-4 h-4 ${c.icon}`} />
                   <span className="text-sm font-semibold text-slate-700">{a.label}</span>
                   <Plus className="w-3.5 h-3.5 text-slate-400" />
@@ -222,7 +222,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Row 1: Top KPIs ── */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
             label={thisMonth ? `Revenue — ${MONTHS[thisMonth.month]} ${thisMonth.year}` : "Revenue"}
             value={thisMonth ? `GHS ${mVal(thisMonth,"sales").toLocaleString()}` : "—"}
@@ -250,10 +250,10 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Row 2: Monthly expense breakdown + Branch visit scores ── */}
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Expense category comparison */}
-          <div className="col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Monthly Expense Breakdown</h2>
@@ -427,10 +427,10 @@ export default function DashboardPage() {
         )}
 
         {/* ── Row 3: Week on week chart + best/worst + open issues ── */}
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Week on week bar chart */}
-          <div className="col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Week on Week Sales</h2>
@@ -453,7 +453,7 @@ export default function DashboardPage() {
                 {thisWeek && bestDay && (
                   <div className="mt-4 pt-4 border-t border-slate-100">
                     <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">This week — latest report</p>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       {BRANCHES.map(branch => {
                         const best  = getBranchBest(branch);
                         const worst = getBranchWorst(branch);
