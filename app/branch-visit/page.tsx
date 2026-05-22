@@ -49,7 +49,7 @@ type ShelfEntry     = { id: number; workerName: string; shelfArea: string; shelf
 type StaffEntry     = { id: number; name: string; present: boolean | null; inLabCoat: boolean | null };
 type ActionItem     = { id: number; action: string; dueDate: string; responsible: string; branch: string };
 type AutoIssue      = { id: number; description: string; priority: "high" | "medium"; branch: string; assignedTo: string };
-type CashShiftEntry = { date: string; shift: "Morning" | "Afternoon"; pos: string; onHand: string; cashUsed: string };
+type CashShiftEntry = { date: string; shift: "Morning" | "Afternoon"; pos: string; onHand: string };
 type CashReconciliation = Record<string, CashShiftEntry[]>;
 
 type BranchInspection = {
@@ -102,19 +102,17 @@ function createCashRecon(visitDate: string): CashReconciliation {
   const recon: CashReconciliation = {};
   BRANCHES.forEach(branch => {
     recon[branch] = days.flatMap(date => ([
-      { date, shift: "Morning" as const,   pos: "", onHand: "", cashUsed: "" },
-      { date, shift: "Afternoon" as const, pos: "", onHand: "", cashUsed: "" },
+      { date, shift: "Morning" as const,   pos: "", onHand: "" },
+      { date, shift: "Afternoon" as const, pos: "", onHand: "" },
     ]));
   });
   return recon;
 }
 
-function getCashDiff(pos: string, onHand: string, cashUsed?: string): number | null {
+function getCashDiff(pos: string, onHand: string): number | null {
   const p = parseFloat(pos), oh = parseFloat(onHand);
   if (isNaN(p) || isNaN(oh) || pos === "" || onHand === "") return null;
-  const cu = cashUsed && cashUsed !== "" ? (parseFloat(cashUsed) || 0) : 0;
-  // Adjusted difference: On Hand − (POS − Cash Used for shop)
-  return oh - (p - cu);
+  return oh - p;
 }
 
 function isCashFlagged(diff: number | null): boolean {
@@ -446,7 +444,7 @@ function BranchVisitContent() {
       // Cash reconciliation — each shift with data counts: clean = true, flagged = false
       ...(cashReconciliation[branch] || [])
         .filter(e => e.pos !== "" && e.onHand !== "")
-        .map(e => !isCashFlagged(getCashDiff(e.pos, e.onHand, e.cashUsed))),
+        .map(e => !isCashFlagged(getCashDiff(e.pos, e.onHand))),
     ].filter(v => v !== null) as boolean[];
     const qualityScore = qualityRatings.length > 0
       ? (qualityRatings.reduce((a, b) => a + b, 0) / qualityRatings.length / 5) * 100 : 0;
@@ -527,11 +525,10 @@ function BranchVisitContent() {
         issues.push({ id: id++, description: `Customer complaints reported${d.adminComms.customerComplaints.notes ? ` — ${d.adminComms.customerComplaints.notes}` : ""}`, priority: "medium", branch, assignedTo: "" });
       // Cash reconciliation — flagged shifts
       (cashReconciliation[branch] || []).forEach(entry => {
-        const diff = getCashDiff(entry.pos, entry.onHand, entry.cashUsed);
+        const diff = getCashDiff(entry.pos, entry.onHand);
         if (isCashFlagged(diff)) {
           const sign = diff! > 0 ? "+" : "";
-          const usedNote = entry.cashUsed && entry.cashUsed !== "" ? `, Cash Used: ${entry.cashUsed}` : "";
-          issues.push({ id: id++, description: `Cash difference: ${entry.shift} shift on ${fmtDay(entry.date)} — GHS ${sign}${diff!.toFixed(2)} (POS: ${entry.pos}, On Hand: ${entry.onHand}${usedNote})`, priority: Math.abs(diff!) > 50 ? "high" : "medium", branch, assignedTo: "" });
+          issues.push({ id: id++, description: `Cash difference: ${entry.shift} shift on ${fmtDay(entry.date)} — GHS ${sign}${diff!.toFixed(2)} (POS: ${entry.pos}, On Hand: ${entry.onHand})`, priority: Math.abs(diff!) > 50 ? "high" : "medium", branch, assignedTo: "" });
         }
       });
     });
@@ -740,13 +737,12 @@ function BranchVisitContent() {
             const hasData = entries.some(e => e.pos || e.onHand);
             if (!hasData) return "";
             const rows = entries.map(e => {
-              const diff = getCashDiff(e.pos, e.onHand, e.cashUsed);
+              const diff = getCashDiff(e.pos, e.onHand);
               const flagged = isCashFlagged(diff);
               const diffStr = diff !== null ? (diff > 0 ? "+" : "") + diff.toFixed(2) : "—";
-              const cashUsedCell = e.cashUsed && e.cashUsed !== "" ? e.cashUsed : "—";
-              return `<tr style="${flagged ? "background:#fee2e2" : ""}"><td>${fmtDay(e.date)}</td><td>${e.shift}</td><td>${e.pos || "—"}</td><td>${e.onHand || "—"}</td><td>${cashUsedCell}</td><td style="font-weight:700;color:${flagged ? "#dc2626" : "#059669"}">${diffStr}${flagged ? " ⚠" : ""}</td></tr>`;
+              return `<tr style="${flagged ? "background:#fee2e2" : ""}"><td>${fmtDay(e.date)}</td><td>${e.shift}</td><td>${e.pos || "—"}</td><td>${e.onHand || "—"}</td><td style="font-weight:700;color:${flagged ? "#dc2626" : "#059669"}">${diffStr}${flagged ? " ⚠" : ""}</td></tr>`;
             }).join("");
-            return `<div class="cat-title">Cash Reconciliation — Last 7 Days</div><table class="inner-table"><tr><th>Date</th><th>Shift</th><th>POS (GHS)</th><th>On Hand (GHS)</th><th>Cash Used (GHS)</th><th>Difference</th></tr>${rows}</table>`;
+            return `<div class="cat-title">Cash Reconciliation — Last 7 Days</div><table class="inner-table"><tr><th>Date</th><th>Shift</th><th>POS (GHS)</th><th>On Hand (GHS)</th><th>Difference</th></tr>${rows}</table>`;
           })()}
         </div>`;
     };
@@ -1283,13 +1279,12 @@ function BranchVisitContent() {
                       <th className="pb-2 pr-2 font-semibold">Shift</th>
                       <th className="pb-2 pr-2 font-semibold">POS (GHS)</th>
                       <th className="pb-2 pr-2 font-semibold">On Hand (GHS)</th>
-                      <th className="pb-2 pr-2 font-semibold text-blue-500">Cash Used (GHS)</th>
                       <th className="pb-2 font-semibold">Difference</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(cashReconciliation[currentBranch] || []).map((entry, i) => {
-                      const diff = getCashDiff(entry.pos, entry.onHand, entry.cashUsed);
+                      const diff = getCashDiff(entry.pos, entry.onHand);
                       const flagged = isCashFlagged(diff);
                       return (
                         <tr key={i} className={`border-b border-slate-100 ${flagged ? "bg-red-50" : ""}`}>
@@ -1318,15 +1313,6 @@ function BranchVisitContent() {
                                 setCashReconciliation(prev => ({ ...prev, [currentBranch]: updated }));
                               }}
                               className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-                          </td>
-                          <td className="py-2 pr-2">
-                            <input type="number" placeholder="0.00" value={entry.cashUsed || ""}
-                              onChange={e => {
-                                const updated = [...(cashReconciliation[currentBranch] || [])];
-                                updated[i] = { ...updated[i], cashUsed: e.target.value };
-                                setCashReconciliation(prev => ({ ...prev, [currentBranch]: updated }));
-                              }}
-                              className="w-24 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
                           </td>
                           <td className="py-2">
                             {diff !== null ? (
