@@ -687,8 +687,54 @@ function generateBranchVisitPDF(report: Record<string, unknown>, autoprint = tru
     const openBal = pc.openingBalance as string || "0";
     const spent = pc.amountSpent as string || "0";
 
+    // ── Score breakdown ─────────────────────────────────────────────────────
+    const _hqi: {label: string, r: number}[] = [
+      {label: "Front of shop cleanliness", r: ((ext.frontCleanliness as {rating?:number}|null)?.rating)||0},
+      {label: "Floors", r: ((int.floors as {rating?:number}|null)?.rating)||0},
+      {label: "Washroom", r: ((int.washroom as {rating?:number}|null)?.rating)||0},
+      {label: "Storeroom", r: ((int.storeroom as {rating?:number}|null)?.rating)||0},
+      {label: "Overall shelf appearance", r: ((sp.overallAppearance as {rating?:number}|null)?.rating)||0},
+      {label: "Counter cleanliness", r: ((sp.counterCleanliness as {rating?:number}|null)?.rating)||0},
+      {label: "Staff attitude", r: ((per.staffAttitude as {rating?:number}|null)?.rating)||0},
+      ...indShelves.map(s => {
+        const _sc2 = s.shelfCleanliness || 0, _dc2 = s.drugCleanliness || 0, _ne2 = s.noEmptySpots || 0;
+        const _ac2 = [_sc2, _dc2, _ne2].filter(v => v > 0);
+        return {label: `${s.workerName ? s.workerName + " — " : ""}${s.shelfArea}`, r: _ac2.length > 0 ? _ac2.reduce((a, v) => a + v, 0) / _ac2.length : (s.rating || 0)};
+      }),
+    ].filter(i => i.r > 0);
+    const _hqs = _hqi.length > 0 ? (_hqi.reduce((a, i) => a + i.r, 0) / _hqi.length / 5) * 100 : 0;
+    const _hqa = _hqi.length > 0 ? _hqi.reduce((a, i) => a + i.r, 0) / _hqi.length : 0;
+    const _hql = _hqi.filter(i => i.r < 3);
+    const _hbi: {label: string, ok: boolean}[] = [
+      ...[
+        {label: "Signage working", v: (ext.signageWorking as {value?:boolean|null}|null)?.value},
+        {label: "POS/PC operational", v: (sys.posOperational as {value?:boolean|null}|null)?.value},
+        {label: "No pending transfers (LavaBMS)", v: (sys.noPendingTransfers as {value?:boolean|null}|null)?.value},
+        {label: "Internet connectivity", v: (sys.internetConnectivity as {value?:boolean|null}|null)?.value},
+        {label: "Mobile devices charged", v: (sys.devicesCharged as {value?:boolean|null}|null)?.value},
+        {label: "Airtime/call credit", v: (sys.airtimeAvailable as {value?:boolean|null}|null)?.value},
+        {label: "AC working", v: (util.acWorking as {value?:boolean|null}|null)?.value},
+        {label: "Fridge working", v: (util.fridgeWorking as {value?:boolean|null}|null)?.value},
+        {label: "Light bulbs functional", v: (util.lightBulbsFunctional as {value?:boolean|null}|null)?.value},
+        {label: "Handover book signed off", v: (doc.handoverBookSignedOff as {value?:boolean|null}|null)?.value},
+        {label: "CCTV operational", v: (sec.cctvOperational as {value?:boolean|null}|null)?.value},
+        {label: "Safe/cash box secured", v: (sec.safeCashBoxSecured as {value?:boolean|null}|null)?.value},
+        {label: "All messages replied", v: (adm.allMessagesReplied as {value?:boolean|null}|null)?.value},
+        {label: "Daily sales report submitted", v: (adm.dailySalesReportSubmitted as {value?:boolean|null}|null)?.value},
+      ].filter(item => item.v !== null && item.v !== undefined).map(item => ({label: item.label, ok: Boolean(item.v)})),
+      ...(cashReconData[branch] || [])
+        .filter(e => e.pos !== "" && e.onHand !== "")
+        .map(e => ({label: `Cash recon ${fmtDay(e.date)} ${e.shift}`, ok: !isReconFlagged(getReconDiff(e.pos, e.onHand))})),
+    ];
+    const _hbp = _hbi.filter(i => i.ok).length;
+    const _hbt = _hbi.length;
+    const _hbs = _hbt > 0 ? (_hbp / _hbt) * 100 : 0;
+    const _hbf = _hbi.filter(i => !i.ok);
+    const _hbkdHtml = `<div class="score-breakdown"><div class="breakdown-header">Score Breakdown — How this score is calculated</div><div class="breakdown-grid"><div class="breakdown-card"><div class="breakdown-card-label">Quality Ratings <span class="breakdown-weight">(50% of score)</span></div><div class="breakdown-card-score" style="color:${sc(_hqs)}">${_hqs.toFixed(0)}%</div><div class="breakdown-card-sub">${_hqi.length} rated items &middot; avg ${_hqa.toFixed(1)}/5</div>${_hql.length > 0 ? `<div class="breakdown-issues">Rated 2/5 or below: ${_hql.map(i => i.label).join(" &middot; ")}</div>` : `<div class="breakdown-ok">All items rated 3/5 or above</div>`}</div><div class="breakdown-card"><div class="breakdown-card-label">Compliance Checks <span class="breakdown-weight">(50% of score)</span></div><div class="breakdown-card-score" style="color:${sc(_hbs)}">${_hbs.toFixed(0)}%</div><div class="breakdown-card-sub">${_hbp} of ${_hbt} checks passed</div>${_hbf.length > 0 ? `<div class="breakdown-issues">Failed: ${_hbf.map(i => i.label).join(" &middot; ")}</div>` : `<div class="breakdown-ok">All checks passed</div>`}</div></div></div>`;
+
     return `<div class="branch-block">
       <div class="branch-title">${branch} — Score: <span style="color:${sc(getBScore(branch))}">${getBScore(branch).toFixed(0)}%</span></div>
+      ${_hbkdHtml}
       <div class="cat-title">Exterior</div>
       ${q("Front of shop cleanliness", ext.frontCleanliness)}${b("Signage working", ext.signageWorking)}
       <div class="cat-title">Interior Spaces</div>
@@ -759,6 +805,16 @@ function generateBranchVisitPDF(report: Record<string, unknown>, autoprint = tru
     .priority-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;color:white;float:right}
     .ph{background:#ef4444}.pm{background:#f59e0b}
     .footer{margin-top:32px;padding-top:16px;border-top:2px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b}
+    .score-breakdown{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px}
+    .breakdown-header{font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:.05em;margin-bottom:8px}
+    .breakdown-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .breakdown-card{background:#f8fafc;border-radius:6px;padding:10px}
+    .breakdown-card-label{font-size:11px;font-weight:600;color:#334155;margin-bottom:4px}
+    .breakdown-weight{font-size:10px;color:#94a3b8;font-weight:400}
+    .breakdown-card-score{font-size:22px;font-weight:700;margin-bottom:2px}
+    .breakdown-card-sub{font-size:10px;color:#64748b;margin-bottom:6px}
+    .breakdown-issues{font-size:10px;color:#dc2626;background:#fee2e2;padding:4px 6px;border-radius:4px;line-height:1.6}
+    .breakdown-ok{font-size:10px;color:#059669;background:#d1fae5;padding:4px 6px;border-radius:4px}
     @media print{body{padding:20px}-webkit-print-color-adjust:exact;print-color-adjust:exact}
   </style></head><body>
   <div class="header"><div>

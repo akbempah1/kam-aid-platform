@@ -665,9 +665,54 @@ function BranchVisitContent() {
           ${item.notes ? `<span class="obs">${item.notes}</span>` : ""}
         </div>` : "";
 
+      // ── Score breakdown ─────────────────────────────────────────────────────
+      const _qi: {label: string, r: number}[] = [
+        {label: "Front of shop cleanliness", r: d.exterior.frontCleanliness.rating},
+        {label: "Floors", r: d.interiorSpaces.floors.rating},
+        {label: "Washroom", r: d.interiorSpaces.washroom.rating},
+        {label: "Storeroom", r: d.interiorSpaces.storeroom.rating},
+        {label: "Overall shelf appearance", r: d.shelvesProducts.overallAppearance.rating},
+        {label: "Counter cleanliness", r: d.shelvesProducts.counterCleanliness.rating},
+        {label: "Staff attitude", r: d.personnel.staffAttitude.rating},
+        ...d.shelvesProducts.individualShelves.map(s => {
+          const _sc = s.shelfCleanliness || 0, _dc = s.drugCleanliness || 0, _ne = s.noEmptySpots || 0;
+          const _ac = [_sc, _dc, _ne].filter(v => v > 0);
+          return {label: `${s.workerName ? s.workerName + " — " : ""}${s.shelfArea}`, r: _ac.length > 0 ? _ac.reduce((a, v) => a + v, 0) / _ac.length : (s.rating || 0)};
+        }),
+      ].filter(i => i.r > 0);
+      const _qs = _qi.length > 0 ? (_qi.reduce((a, i) => a + i.r, 0) / _qi.length / 5) * 100 : 0;
+      const _qa = _qi.length > 0 ? _qi.reduce((a, i) => a + i.r, 0) / _qi.length : 0;
+      const _ql = _qi.filter(i => i.r < 3);
+      const _ce = (cashReconciliation[branch] || []).filter(e => e.pos !== "" && e.onHand !== "");
+      const _bi: {label: string, ok: boolean}[] = [
+        ...(([
+          {label: "Signage working", v: d.exterior.signageWorking.value},
+          {label: "POS/PC operational", v: d.systems.posOperational.value},
+          {label: "No pending transfers (LavaBMS)", v: d.systems.noPendingTransfers.value},
+          {label: "Internet connectivity", v: d.systems.internetConnectivity.value},
+          {label: "Mobile devices charged", v: d.systems.devicesCharged.value},
+          {label: "Airtime/call credit", v: d.systems.airtimeAvailable.value},
+          {label: "AC working", v: d.utilities.acWorking.value},
+          {label: "Fridge working", v: d.utilities.fridgeWorking.value},
+          {label: "Light bulbs functional", v: d.utilities.lightBulbsFunctional.value},
+          {label: "Handover book signed off", v: d.documentation.handoverBookSignedOff.value},
+          {label: "CCTV operational", v: d.security.cctvOperational.value},
+          {label: "Safe/cash box secured", v: d.security.safeCashBoxSecured.value},
+          {label: "All messages replied", v: d.adminComms.allMessagesReplied.value},
+          {label: "Daily sales report submitted", v: d.adminComms.dailySalesReportSubmitted.value},
+        ] as {label: string, v: boolean|null}[]).filter(i => i.v !== null).map(i => ({label: i.label, ok: i.v as boolean}))),
+        ..._ce.map(e => ({label: `Cash recon ${fmtDay(e.date)} ${e.shift}`, ok: !isCashFlagged(getCashDiff(e.pos, e.onHand))})),
+      ];
+      const _bp = _bi.filter(i => i.ok).length;
+      const _bt = _bi.length;
+      const _bs = _bt > 0 ? (_bp / _bt) * 100 : 0;
+      const _bf = _bi.filter(i => !i.ok);
+      const _bkdHtml = `<div class="score-breakdown"><div class="breakdown-header">Score Breakdown — How this score is calculated</div><div class="breakdown-grid"><div class="breakdown-card"><div class="breakdown-card-label">Quality Ratings <span class="breakdown-weight">(50% of score)</span></div><div class="breakdown-card-score" style="color:${scoreColor(_qs)}">${_qs.toFixed(0)}%</div><div class="breakdown-card-sub">${_qi.length} rated items &middot; avg ${_qa.toFixed(1)}/5</div>${_ql.length > 0 ? `<div class="breakdown-issues">Rated 2/5 or below: ${_ql.map(i => i.label).join(" &middot; ")}</div>` : `<div class="breakdown-ok">All items rated 3/5 or above</div>`}</div><div class="breakdown-card"><div class="breakdown-card-label">Compliance Checks <span class="breakdown-weight">(50% of score)</span></div><div class="breakdown-card-score" style="color:${scoreColor(_bs)}">${_bs.toFixed(0)}%</div><div class="breakdown-card-sub">${_bp} of ${_bt} checks passed</div>${_bf.length > 0 ? `<div class="breakdown-issues">Failed: ${_bf.map(i => i.label).join(" &middot; ")}</div>` : `<div class="breakdown-ok">All checks passed</div>`}</div></div></div>`;
+
       return `
         <div class="branch-block">
           <div class="branch-title">${branch} — Score: <span style="color:${scoreColor(getBranchScore(branch))}">${getBranchScore(branch).toFixed(0)}%</span></div>
+          ${_bkdHtml}
           <div class="cat-title">Exterior</div>
           ${q("Front of shop cleanliness", d.exterior.frontCleanliness)}
           ${b("Signage working", d.exterior.signageWorking)}
@@ -770,6 +815,16 @@ function BranchVisitContent() {
       .priority-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;color:white;float:right}
       .ph{background:#ef4444}.pm{background:#f59e0b}
       .footer{margin-top:32px;padding-top:16px;border-top:2px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b}
+      .score-breakdown{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px}
+      .breakdown-header{font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:.05em;margin-bottom:8px}
+      .breakdown-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      .breakdown-card{background:#f8fafc;border-radius:6px;padding:10px}
+      .breakdown-card-label{font-size:11px;font-weight:600;color:#334155;margin-bottom:4px}
+      .breakdown-weight{font-size:10px;color:#94a3b8;font-weight:400}
+      .breakdown-card-score{font-size:22px;font-weight:700;margin-bottom:2px}
+      .breakdown-card-sub{font-size:10px;color:#64748b;margin-bottom:6px}
+      .breakdown-issues{font-size:10px;color:#dc2626;background:#fee2e2;padding:4px 6px;border-radius:4px;line-height:1.6}
+      .breakdown-ok{font-size:10px;color:#059669;background:#d1fae5;padding:4px 6px;border-radius:4px}
       @media print{body{padding:20px}-webkit-print-color-adjust:exact;print-color-adjust:exact}
     </style></head><body>
     <div class="header">
